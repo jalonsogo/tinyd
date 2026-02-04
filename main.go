@@ -37,6 +37,8 @@ type Image struct {
 	Tag     string
 	Size    string
 	Created string
+	InUse   bool // Whether the image is used by any container
+	Dangling bool // Whether the image has <none> tag/repo
 }
 
 // Volume represents a Docker volume
@@ -46,6 +48,7 @@ type Volume struct {
 	Mountpoint string
 	Scope      string
 	Created    string
+	InUse      bool // Whether the volume is mounted to any container
 }
 
 // Network represents a Docker network
@@ -56,6 +59,7 @@ type Network struct {
 	Scope   string
 	IPv4    string
 	IPv6    string
+	InUse   bool // Whether the network has any connected containers
 }
 
 // Message types for Bubble Tea
@@ -411,6 +415,36 @@ func getStatusPriority(status string) int {
 	}
 }
 
+// Get image priority for sorting (lower number = higher priority)
+// In Use > Unused > Dangling
+func getImagePriority(img Image) int {
+	if img.InUse {
+		return 1
+	} else if img.Dangling {
+		return 3
+	} else {
+		return 2 // Unused but not dangling
+	}
+}
+
+// Get volume priority for sorting (lower number = higher priority)
+// In Use > Unused
+func getVolumePriority(vol Volume) int {
+	if vol.InUse {
+		return 1
+	}
+	return 2
+}
+
+// Get network priority for sorting (lower number = higher priority)
+// In Use > Unused
+func getNetworkPriority(net Network) int {
+	if net.InUse {
+		return 1
+	}
+	return 2
+}
+
 // Format ports for display
 func formatPorts(ports []container.PortSummary) string {
 	if len(ports) == 0 {
@@ -489,14 +523,25 @@ func fetchImages(cli *client.Client) tea.Cmd {
 				imageID = imageID[7:19] // Skip "sha256:" prefix and take 12 chars
 			}
 
+			// Determine if image is in use or dangling
+			inUse := img.Containers > 0
+			dangling := (repo == "<none>" || tag == "<none>")
+
 			displayImages = append(displayImages, Image{
 				ID:         imageID,
 				Repository: repo,
 				Tag:        tag,
 				Size:       size,
 				Created:    createdStr,
+				InUse:      inUse,
+				Dangling:   dangling,
 			})
 		}
+
+		// Sort images by priority: In Use > Unused > Dangling
+		sort.SliceStable(displayImages, func(i, j int) bool {
+			return getImagePriority(displayImages[i]) < getImagePriority(displayImages[j])
+		})
 
 		return imageListMsg(displayImages)
 	}
@@ -535,14 +580,26 @@ func fetchVolumes(cli *client.Client) tea.Cmd {
 				}
 			}
 
+			// Determine if volume is in use
+			inUse := false
+			if vol.UsageData != nil && vol.UsageData.RefCount > 0 {
+				inUse = true
+			}
+
 			displayVolumes = append(displayVolumes, Volume{
 				Name:       name,
 				Driver:     vol.Driver,
 				Mountpoint: mountpoint,
 				Scope:      vol.Scope,
 				Created:    created,
+				InUse:      inUse,
 			})
 		}
+
+		// Sort volumes by priority: In Use > Unused
+		sort.SliceStable(displayVolumes, func(i, j int) bool {
+			return getVolumePriority(displayVolumes[i]) < getVolumePriority(displayVolumes[j])
+		})
 
 		return volumeListMsg(displayVolumes)
 	}
@@ -556,6 +613,23 @@ func fetchNetworks(cli *client.Client) tea.Cmd {
 		}
 
 		ctx := context.Background()
+
+		// First, get all containers to determine which networks are in use
+		containersResult, err := cli.ContainerList(ctx, client.ContainerListOptions{All: true})
+		if err != nil {
+			return errMsg(err)
+		}
+
+		// Build a set of network IDs that are in use
+		networksInUse := make(map[string]bool)
+		for _, c := range containersResult.Items {
+			if c.NetworkSettings != nil && c.NetworkSettings.Networks != nil {
+				for networkName := range c.NetworkSettings.Networks {
+					networksInUse[networkName] = true
+				}
+			}
+		}
+
 		result, err := cli.NetworkList(ctx, client.NetworkListOptions{})
 		if err != nil {
 			return errMsg(err)
@@ -594,6 +668,9 @@ func fetchNetworks(cli *client.Client) tea.Cmd {
 				networkID = networkID[:12]
 			}
 
+			// Determine if network is in use (has connected containers)
+			inUse := networksInUse[net.Name] || networksInUse[net.ID]
+
 			displayNetworks = append(displayNetworks, Network{
 				ID:     networkID,
 				Name:   name,
@@ -601,8 +678,14 @@ func fetchNetworks(cli *client.Client) tea.Cmd {
 				Scope:  net.Scope,
 				IPv4:   ipv4,
 				IPv6:   ipv6,
+				InUse:  inUse,
 			})
 		}
+
+		// Sort networks by priority: In Use > Unused
+		sort.SliceStable(displayNetworks, func(i, j int) bool {
+			return getNetworkPriority(displayNetworks[i]) < getNetworkPriority(displayNetworks[j])
+		})
 
 		return networkListMsg(displayNetworks)
 	}

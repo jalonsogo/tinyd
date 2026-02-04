@@ -84,6 +84,8 @@ const (
 	viewModePortSelector
 	viewModeStopConfirm
 	viewModeFilter
+	viewModeRunImage
+	viewModeDeleteConfirm
 )
 
 // Filter types for each tab
@@ -154,11 +156,46 @@ type model struct {
 	filterOptions   []string
 	selectedFilter  int
 
+	// Run image modal
+	selectedImage     *Image
+	runContainerName  string
+	runPortHost       string
+	runPortContainer  string
+	runPorts          []PortMapping
+	runVolumes        []VolumeMapping
+	runEnvVars        []EnvVar
+	runSelectedVolume string
+	runVolumeHost     string
+	runVolumeContainer string
+	runEnvKey         string
+	runEnvValue       string
+	runModalField     int // Track which field is being edited
+
 	// Components
 	header     HeaderComponent
 	tabs       TabsComponent
 	actionBar  ActionBarComponent
 	detailView DetailViewComponent
+}
+
+// PortMapping for run modal
+type PortMapping struct {
+	Host      string
+	Container string
+}
+
+// VolumeMapping for run modal
+type VolumeMapping struct {
+	Host      string
+	Container string
+	IsNamed   bool
+	VolumeName string
+}
+
+// EnvVar for run modal
+type EnvVar struct {
+	Key   string
+	Value string
 }
 
 // Color palette matching the Pencil design
@@ -1038,6 +1075,88 @@ func inspectContainer(cli *client.Client, containerID string) tea.Cmd {
 	}
 }
 
+// Delete image
+func deleteImage(cli *client.Client, imageID string) tea.Cmd {
+	return func() tea.Msg {
+		if cli == nil {
+			return errMsg(fmt.Errorf("docker client not initialized"))
+		}
+
+		ctx := context.Background()
+		_, err := cli.ImageRemove(ctx, imageID, client.ImageRemoveOptions{Force: false, PruneChildren: true})
+		if err != nil {
+			return actionErrorMsg(fmt.Sprintf("Failed to delete image: %v", err))
+		}
+
+		return actionSuccessMsg("Image deleted successfully")
+	}
+}
+
+// Run container from image
+func runContainer(cli *client.Client, image *Image, containerName string, ports []PortMapping, volumes []VolumeMapping, envVars []EnvVar) tea.Cmd {
+	return func() tea.Msg {
+		if cli == nil {
+			return errMsg(fmt.Errorf("docker client not initialized"))
+		}
+
+		ctx := context.Background()
+
+		// Build image reference
+		imageRef := image.Repository + ":" + image.Tag
+
+		// Build container config
+		config := &container.Config{
+			Image: imageRef,
+		}
+
+		// Add environment variables
+		if len(envVars) > 0 {
+			env := make([]string, len(envVars))
+			for i, e := range envVars {
+				env[i] = e.Key + "=" + e.Value
+			}
+			config.Env = env
+		}
+
+		// Build host config for ports and volumes
+		hostConfig := &container.HostConfig{}
+
+		// TODO: Port bindings - need to handle proper port mapping
+		// For now, basic container creation without port mappings
+
+		// Add volume mounts
+		if len(volumes) > 0 {
+			mounts := make([]string, len(volumes))
+			for i, v := range volumes {
+				if v.IsNamed {
+					mounts[i] = v.VolumeName + ":" + v.Container
+				} else {
+					mounts[i] = v.Host + ":" + v.Container
+				}
+			}
+			hostConfig.Binds = mounts
+		}
+
+		// Create container
+		resp, err := cli.ContainerCreate(ctx, client.ContainerCreateOptions{
+			Config:     config,
+			HostConfig: hostConfig,
+			Name:       containerName,
+		})
+		if err != nil {
+			return actionErrorMsg(fmt.Sprintf("Failed to create container: %v", err))
+		}
+
+		// Start container
+		_, err = cli.ContainerStart(ctx, resp.ID, client.ContainerStartOptions{})
+		if err != nil {
+			return actionErrorMsg(fmt.Sprintf("Failed to start container: %v", err))
+		}
+
+		return actionSuccessMsg(fmt.Sprintf("Container started: %s", resp.ID[:12]))
+	}
+}
+
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
@@ -1046,8 +1165,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
-		// In modal views (stop confirm, port selector, filter), only allow specific keys
-		if m.currentView == viewModeStopConfirm || m.currentView == viewModePortSelector || m.currentView == viewModeFilter {
+		// In modal views (stop confirm, port selector, filter, run image, delete confirm), only allow specific keys
+		if m.currentView == viewModeStopConfirm || m.currentView == viewModePortSelector || m.currentView == viewModeFilter || m.currentView == viewModeRunImage || m.currentView == viewModeDeleteConfirm {
 			key := msg.String()
 			// Allow quit, ESC, and Enter to pass through to main switch
 			// Allow up/down for port selector and filter modal
@@ -1273,16 +1392,76 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.selectedFilter = m.networkFilter
 				}
 			}
+		case "n":
+			// Run (ruN) image (Images tab only)
+			if m.activeTab == 1 && m.currentView == viewModeList {
+				filteredImages := filterImages(m.images, m.containers, m.imageFilter)
+				if len(filteredImages) > 0 && m.selectedRow < len(filteredImages) {
+					selectedImage := filteredImages[m.selectedRow]
+					m.selectedImage = &selectedImage
+					m.currentView = viewModeRunImage
+					// Reset form fields
+					m.runContainerName = ""
+					m.runPortHost = ""
+					m.runPortContainer = ""
+					m.runPorts = []PortMapping{}
+					m.runVolumes = []VolumeMapping{}
+					m.runEnvVars = []EnvVar{}
+					m.runVolumeHost = ""
+					m.runVolumeContainer = ""
+					m.runEnvKey = ""
+					m.runEnvValue = ""
+					m.runModalField = 0
+				}
+			}
+		case "d":
+			// Delete image (Images tab only)
+			if m.activeTab == 1 && m.currentView == viewModeList {
+				filteredImages := filterImages(m.images, m.containers, m.imageFilter)
+				if len(filteredImages) > 0 && m.selectedRow < len(filteredImages) {
+					selectedImage := filteredImages[m.selectedRow]
+					m.selectedImage = &selectedImage
+					m.currentView = viewModeDeleteConfirm
+				}
+			}
+		case "p":
+			// Pull image (Images tab only)
+			if m.activeTab == 1 && m.currentView == viewModeList && !m.actionInProgress {
+				m.actionInProgress = true
+				m.statusMessage = "Enter image name to pull (e.g., nginx:latest)"
+				// TODO: Implement image pull modal/prompt
+			}
 		case "esc":
 			// Return to list view
 			if m.currentView != viewModeList {
 				m.currentView = viewModeList
 				m.selectedContainer = nil
+				m.selectedImage = nil
 				m.logsContent = ""
 				m.inspectContent = ""
 				m.availablePorts = nil
 			}
 		case "enter":
+			// In delete confirmation modal, execute delete
+			if m.currentView == viewModeDeleteConfirm {
+				if m.selectedImage != nil {
+					m.currentView = viewModeList
+					m.actionInProgress = true
+					m.statusMessage = fmt.Sprintf("Deleting image %s:%s...", m.selectedImage.Repository, m.selectedImage.Tag)
+					return m, deleteImage(m.dockerClient, m.selectedImage.ID)
+				}
+			}
+
+			// In run image modal, execute run container
+			if m.currentView == viewModeRunImage {
+				if m.selectedImage != nil {
+					m.currentView = viewModeList
+					m.actionInProgress = true
+					m.statusMessage = "Starting container..."
+					return m, runContainer(m.dockerClient, m.selectedImage, m.runContainerName, m.runPorts, m.runVolumes, m.runEnvVars)
+				}
+			}
+
 			// In stop confirmation modal, execute stop
 			if m.currentView == viewModeStopConfirm {
 				if m.selectedContainer != nil {
@@ -1677,6 +1856,10 @@ func (m model) View() string {
 		return m.renderStopConfirm()
 	case viewModeFilter:
 		return m.renderFilterModal()
+	case viewModeRunImage:
+		return m.renderRunImageModal()
+	case viewModeDeleteConfirm:
+		return m.renderDeleteConfirm()
 	}
 
 	// Render based on active tab (list view)
@@ -1992,7 +2175,12 @@ func (m model) renderImages() string {
 
 	// Action bar component with responsive width
 	m.actionBar = m.actionBar.SetStatusMessage(m.statusMessage)
-	m.actionBar = m.actionBar.SetActions("")
+	if m.statusMessage == "" && len(filteredImages) > 0 {
+		actions := " " + "ru" + renderShortcut("N") + " | " + renderShortcut("Delete") + " | " + renderShortcut("Pull") + " | " + renderShortcut("Filter")
+		m.actionBar = m.actionBar.SetActions(actions)
+	} else {
+		m.actionBar = m.actionBar.SetActions("")
+	}
 	actionBar := m.actionBar.WithWidth(width)
 	b.WriteString(actionBar.View())
 
@@ -2484,10 +2672,12 @@ func (m model) renderFilterModal() string {
 	borderColor := lipgloss.Color("#666666")
 	textColor := lipgloss.Color("#CCCCCC")
 	selectedColor := lipgloss.Color("#FFFFFF")
+	checkColor := lipgloss.Color("#00FF00") // Green checkmark
 
 	borderStyle := lipgloss.NewStyle().Foreground(borderColor)
 	textStyle := lipgloss.NewStyle().Foreground(textColor)
 	selectedStyle := lipgloss.NewStyle().Foreground(selectedColor).Bold(true)
+	checkStyle := lipgloss.NewStyle().Foreground(checkColor)
 
 	// Calculate inner width
 	innerWidth := modalWidth - 4
@@ -2496,8 +2686,8 @@ func (m model) renderFilterModal() string {
 	modalContent.WriteString(borderStyle.Render("╭" + strings.Repeat("─", innerWidth+2) + "╮") + "\n")
 
 	// Title
-	title := " Filter"
-	titlePadding := innerWidth - len(title) + 1
+	title := " Filter "
+	titlePadding := innerWidth + 2 - len(title)
 	modalContent.WriteString(borderStyle.Render("│") + textStyle.Render(title) + strings.Repeat(" ", titlePadding) + borderStyle.Render("│") + "\n")
 
 	// Divider
@@ -2508,19 +2698,21 @@ func (m model) renderFilterModal() string {
 
 	// Filter options with checkbox style
 	for i, option := range m.filterOptions {
-		var optionLine string
 		if i == m.selectedFilter {
-			// Selected option with checkbox
-			optionLine = " [✓] " + option
-			optionText := selectedStyle.Render(optionLine)
-			padding := innerWidth - len(optionLine) + 2
-			modalContent.WriteString(borderStyle.Render("│") + optionText + strings.Repeat(" ", padding) + borderStyle.Render("│") + "\n")
+			// Selected option with green checkbox
+			checkbox := checkStyle.Render("[✓]")
+			optionText := selectedStyle.Render(" " + option)
+			// Calculate clean lengths for proper spacing
+			cleanLen := 1 + 3 + 1 + len(option) // space + [✓] + space + option
+			padding := innerWidth + 2 - cleanLen
+			modalContent.WriteString(borderStyle.Render("│") + " " + checkbox + optionText + strings.Repeat(" ", padding) + borderStyle.Render("│") + "\n")
 		} else {
 			// Unselected option with empty checkbox
-			optionLine = " [ ] " + option
-			optionText := textStyle.Render(optionLine)
-			padding := innerWidth - len(optionLine) + 2
-			modalContent.WriteString(borderStyle.Render("│") + optionText + strings.Repeat(" ", padding) + borderStyle.Render("│") + "\n")
+			checkbox := textStyle.Render("[ ]")
+			optionText := textStyle.Render(" " + option)
+			cleanLen := 1 + 3 + 1 + len(option) // space + [ ] + space + option
+			padding := innerWidth + 2 - cleanLen
+			modalContent.WriteString(borderStyle.Render("│") + " " + checkbox + optionText + strings.Repeat(" ", padding) + borderStyle.Render("│") + "\n")
 		}
 	}
 
@@ -2528,9 +2720,9 @@ func (m model) renderFilterModal() string {
 	modalContent.WriteString(borderStyle.Render("│") + strings.Repeat(" ", innerWidth+2) + borderStyle.Render("│") + "\n")
 
 	// Footer with keyboard shortcuts
-	footerText := " ↑/↓ navigate, " + renderShortcut("Enter") + " select-apply, " + renderShortcut("Esc") + " exit"
-	footerClean := " ↑/↓ navigate, Enter select-apply, Esc exit"
-	footerPadding := innerWidth - len(footerClean) + 2
+	footerText := " ↑/↓ navigate, " + renderShortcut("Enter") + " select-apply, " + renderShortcut("Esc") + " exit "
+	footerClean := " ↑/↓ navigate, Enter select-apply, Esc exit "
+	footerPadding := innerWidth + 2 - len(footerClean)
 	modalContent.WriteString(borderStyle.Render("│") + footerText + strings.Repeat(" ", footerPadding) + borderStyle.Render("│") + "\n")
 
 	// Bottom border
@@ -2679,6 +2871,345 @@ func (m model) renderStopConfirm() string {
 	for i := 0; i < len(baseLines) && i < len(modalLines); i++ {
 		if strings.TrimSpace(modalLines[i]) != "" {
 			result.WriteString(modalLines[i])
+		} else {
+			result.WriteString(baseLines[i])
+		}
+		result.WriteString("\n")
+	}
+
+	return result.String()
+}
+
+func (m model) renderDeleteConfirm() string {
+	// Use responsive dimensions
+	width := m.width
+	if width < 60 {
+		width = 60
+	}
+	height := m.height
+	if height < 20 {
+		height = 20
+	}
+
+	// Render base view (images list)
+	baseView := m.renderImages()
+
+	imageName := "Image"
+	if m.selectedImage != nil {
+		imageName = m.selectedImage.Repository + ":" + m.selectedImage.Tag
+	}
+
+	// Dim the base view
+	dimStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#666666"))
+
+	dimmedBase := dimStyle.Render(baseView)
+
+	// Modal dimensions
+	modalWidth := 50
+	if modalWidth > width-10 {
+		modalWidth = width - 10
+	}
+
+	// Build modal with box-drawing characters
+	var modalContent strings.Builder
+
+	borderColor := lipgloss.Color("#666666")
+	textColor := lipgloss.Color("#CCCCCC")
+	warningColor := lipgloss.Color("#FFFFFF")
+	subTextColor := lipgloss.Color("#999999")
+
+	borderStyle := lipgloss.NewStyle().Foreground(borderColor)
+	textStyle := lipgloss.NewStyle().Foreground(textColor)
+	warningStyle := lipgloss.NewStyle().Foreground(warningColor)
+	subStyle := lipgloss.NewStyle().Foreground(subTextColor)
+
+	// Calculate inner width
+	innerWidth := modalWidth - 4
+
+	// Top border
+	modalContent.WriteString(borderStyle.Render("╭" + strings.Repeat("─", innerWidth+2) + "╮") + "\n")
+
+	// Title
+	title := " Delete Image "
+	padding := strings.Repeat(" ", innerWidth+2-len(title))
+	modalContent.WriteString(borderStyle.Render("│") + textStyle.Render(title) + padding + borderStyle.Render("│") + "\n")
+
+	// Divider
+	modalContent.WriteString(borderStyle.Render("├" + strings.Repeat("─", innerWidth+2) + "┤") + "\n")
+
+	// Empty line
+	modalContent.WriteString(borderStyle.Render("│") + strings.Repeat(" ", innerWidth+2) + borderStyle.Render("│") + "\n")
+
+	// Warning message
+	warning := " Are you sure you want to delete?"
+	warningPadding := strings.Repeat(" ", innerWidth+2-len(warning))
+	modalContent.WriteString(borderStyle.Render("│") + warningStyle.Render(warning) + warningPadding + borderStyle.Render("│") + "\n")
+
+	// Empty line
+	modalContent.WriteString(borderStyle.Render("│") + strings.Repeat(" ", innerWidth+2) + borderStyle.Render("│") + "\n")
+
+	// Image name
+	imageText := " Image: " + imageName
+	if len(imageText) > innerWidth {
+		imageText = imageText[:innerWidth-3] + "..."
+	}
+	imgPadding := strings.Repeat(" ", innerWidth+2-len(imageText))
+	modalContent.WriteString(borderStyle.Render("│") + subStyle.Render(imageText) + imgPadding + borderStyle.Render("│") + "\n")
+
+	// Empty line
+	modalContent.WriteString(borderStyle.Render("│") + strings.Repeat(" ", innerWidth+2) + borderStyle.Render("│") + "\n")
+
+	// Footer
+	modalContent.WriteString(borderStyle.Render("├" + strings.Repeat("─", innerWidth+2) + "┤") + "\n")
+
+	// Keyboard shortcuts
+	footerText := " " + renderShortcut("Enter") + " confirm, " + renderShortcut("Esc") + " cancel"
+	footerPadding := strings.Repeat(" ", innerWidth+2-len(stripAnsiCodes(footerText)))
+	modalContent.WriteString(borderStyle.Render("│") + footerText + footerPadding + borderStyle.Render("│") + "\n")
+
+	// Bottom border
+	modalContent.WriteString(borderStyle.Render("╰" + strings.Repeat("─", innerWidth+2) + "╯") + "\n")
+
+	// Overlay modal on base view
+	modal := modalContent.String()
+	modalLines := strings.Split(modal, "\n")
+
+	baseLines := strings.Split(dimmedBase, "\n")
+	var result strings.Builder
+
+	// Center modal vertically and horizontally
+	modalHeight := len(modalLines)
+	verticalPadding := (height - modalHeight) / 2
+	if verticalPadding < 0 {
+		verticalPadding = 0
+	}
+
+	for i := 0; i < len(baseLines); i++ {
+		if i >= verticalPadding && i < verticalPadding+modalHeight {
+			modalLineIdx := i - verticalPadding
+			if modalLineIdx < len(modalLines) {
+				// Center modal horizontally
+				leftPadding := (width - modalWidth) / 2
+				if leftPadding < 0 {
+					leftPadding = 0
+				}
+				result.WriteString(strings.Repeat(" ", leftPadding) + modalLines[modalLineIdx])
+			} else {
+				result.WriteString(baseLines[i])
+			}
+		} else {
+			result.WriteString(baseLines[i])
+		}
+		result.WriteString("\n")
+	}
+
+	return result.String()
+}
+
+func (m model) renderRunImageModal() string {
+	// Use responsive dimensions
+	width := m.width
+	if width < 80 {
+		width = 80
+	}
+	height := m.height
+	if height < 30 {
+		height = 30
+	}
+
+	// Render base view (images list)
+	baseView := m.renderImages()
+
+	imageName := "Image"
+	if m.selectedImage != nil {
+		imageName = m.selectedImage.Repository + ":" + m.selectedImage.Tag
+	}
+
+	// Dim the base view
+	dimStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#666666"))
+
+	dimmedBase := dimStyle.Render(baseView)
+
+	// Modal dimensions
+	modalWidth := 70
+	if modalWidth > width-10 {
+		modalWidth = width - 10
+	}
+
+	// Build modal with box-drawing characters
+	var modalContent strings.Builder
+
+	borderColor := lipgloss.Color("#666666")
+	textColor := lipgloss.Color("#CCCCCC")
+	labelColor := lipgloss.Color("#999999")
+	inputColor := lipgloss.Color("#FFFFFF")
+
+	borderStyle := lipgloss.NewStyle().Foreground(borderColor)
+	textStyle := lipgloss.NewStyle().Foreground(textColor)
+	labelStyle := lipgloss.NewStyle().Foreground(labelColor)
+	inputStyle := lipgloss.NewStyle().Foreground(inputColor)
+
+	// Calculate inner width
+	innerWidth := modalWidth - 4
+
+	// Top border
+	modalContent.WriteString(borderStyle.Render("╭" + strings.Repeat("─", innerWidth+2) + "╮") + "\n")
+
+	// Title
+	title := " Run Container: " + imageName
+	if len(title) > innerWidth+2 {
+		title = title[:innerWidth-1] + "..."
+	}
+	padding := strings.Repeat(" ", innerWidth+2-len(title))
+	modalContent.WriteString(borderStyle.Render("│") + textStyle.Render(title) + padding + borderStyle.Render("│") + "\n")
+
+	// Divider
+	modalContent.WriteString(borderStyle.Render("├" + strings.Repeat("─", innerWidth+2) + "┤") + "\n")
+
+	// Container name
+	modalContent.WriteString(borderStyle.Render("│") + strings.Repeat(" ", innerWidth+2) + borderStyle.Render("│") + "\n")
+	nameLabel := " Container name: " + m.runContainerName
+	if len(nameLabel) > innerWidth {
+		nameLabel = nameLabel[:innerWidth-3] + "..."
+	}
+	namePadding := strings.Repeat(" ", innerWidth+2-len(nameLabel))
+	modalContent.WriteString(borderStyle.Render("│") + labelStyle.Render(nameLabel) + namePadding + borderStyle.Render("│") + "\n")
+
+	// Ports section
+	modalContent.WriteString(borderStyle.Render("│") + strings.Repeat(" ", innerWidth+2) + borderStyle.Render("│") + "\n")
+	portsSectionLabel := " Ports:"
+	portsSectionPadding := strings.Repeat(" ", innerWidth+2-len(portsSectionLabel))
+	modalContent.WriteString(borderStyle.Render("│") + labelStyle.Render(portsSectionLabel) + portsSectionPadding + borderStyle.Render("│") + "\n")
+
+	// Show existing ports
+	if len(m.runPorts) > 0 {
+		for _, port := range m.runPorts {
+			portLine := "   " + port.Host + ":" + port.Container
+			portLinePadding := strings.Repeat(" ", innerWidth+2-len(portLine))
+			modalContent.WriteString(borderStyle.Render("│") + inputStyle.Render(portLine) + portLinePadding + borderStyle.Render("│") + "\n")
+		}
+	}
+
+	// Add port inputs
+	portHostLabel := "   Host: " + m.runPortHost
+	portHostPadding := strings.Repeat(" ", innerWidth+2-len(portHostLabel))
+	modalContent.WriteString(borderStyle.Render("│") + labelStyle.Render(portHostLabel) + portHostPadding + borderStyle.Render("│") + "\n")
+
+	portContainerLabel := "   Container: " + m.runPortContainer
+	portContainerPadding := strings.Repeat(" ", innerWidth+2-len(portContainerLabel))
+	modalContent.WriteString(borderStyle.Render("│") + labelStyle.Render(portContainerLabel) + portContainerPadding + borderStyle.Render("│") + "\n")
+
+	// Volumes section
+	modalContent.WriteString(borderStyle.Render("│") + strings.Repeat(" ", innerWidth+2) + borderStyle.Render("│") + "\n")
+	volumesSectionLabel := " Volumes:"
+	volumesSectionPadding := strings.Repeat(" ", innerWidth+2-len(volumesSectionLabel))
+	modalContent.WriteString(borderStyle.Render("│") + labelStyle.Render(volumesSectionLabel) + volumesSectionPadding + borderStyle.Render("│") + "\n")
+
+	// Show existing volumes
+	if len(m.runVolumes) > 0 {
+		for _, vol := range m.runVolumes {
+			var volLine string
+			if vol.IsNamed {
+				volLine = "   " + vol.VolumeName + ":" + vol.Container
+			} else {
+				volLine = "   " + vol.Host + ":" + vol.Container
+			}
+			if len(volLine) > innerWidth {
+				volLine = volLine[:innerWidth-3] + "..."
+			}
+			volLinePadding := strings.Repeat(" ", innerWidth+2-len(volLine))
+			modalContent.WriteString(borderStyle.Render("│") + inputStyle.Render(volLine) + volLinePadding + borderStyle.Render("│") + "\n")
+		}
+	}
+
+	// Add volume inputs
+	volHostLabel := "   Host path: " + m.runVolumeHost
+	if len(volHostLabel) > innerWidth {
+		volHostLabel = volHostLabel[:innerWidth-3] + "..."
+	}
+	volHostPadding := strings.Repeat(" ", innerWidth+2-len(volHostLabel))
+	modalContent.WriteString(borderStyle.Render("│") + labelStyle.Render(volHostLabel) + volHostPadding + borderStyle.Render("│") + "\n")
+
+	volContainerLabel := "   Container path: " + m.runVolumeContainer
+	if len(volContainerLabel) > innerWidth {
+		volContainerLabel = volContainerLabel[:innerWidth-3] + "..."
+	}
+	volContainerPadding := strings.Repeat(" ", innerWidth+2-len(volContainerLabel))
+	modalContent.WriteString(borderStyle.Render("│") + labelStyle.Render(volContainerLabel) + volContainerPadding + borderStyle.Render("│") + "\n")
+
+	// Environment variables section
+	modalContent.WriteString(borderStyle.Render("│") + strings.Repeat(" ", innerWidth+2) + borderStyle.Render("│") + "\n")
+	envSectionLabel := " Environment Variables:"
+	envSectionPadding := strings.Repeat(" ", innerWidth+2-len(envSectionLabel))
+	modalContent.WriteString(borderStyle.Render("│") + labelStyle.Render(envSectionLabel) + envSectionPadding + borderStyle.Render("│") + "\n")
+
+	// Show existing env vars
+	if len(m.runEnvVars) > 0 {
+		for _, env := range m.runEnvVars {
+			envLine := "   " + env.Key + "=" + env.Value
+			if len(envLine) > innerWidth {
+				envLine = envLine[:innerWidth-3] + "..."
+			}
+			envLinePadding := strings.Repeat(" ", innerWidth+2-len(envLine))
+			modalContent.WriteString(borderStyle.Render("│") + inputStyle.Render(envLine) + envLinePadding + borderStyle.Render("│") + "\n")
+		}
+	}
+
+	// Add env var inputs
+	envKeyLabel := "   Key: " + m.runEnvKey
+	envKeyPadding := strings.Repeat(" ", innerWidth+2-len(envKeyLabel))
+	modalContent.WriteString(borderStyle.Render("│") + labelStyle.Render(envKeyLabel) + envKeyPadding + borderStyle.Render("│") + "\n")
+
+	envValueLabel := "   Value: " + m.runEnvValue
+	if len(envValueLabel) > innerWidth {
+		envValueLabel = envValueLabel[:innerWidth-3] + "..."
+	}
+	envValuePadding := strings.Repeat(" ", innerWidth+2-len(envValueLabel))
+	modalContent.WriteString(borderStyle.Render("│") + labelStyle.Render(envValueLabel) + envValuePadding + borderStyle.Render("│") + "\n")
+
+	// Empty line
+	modalContent.WriteString(borderStyle.Render("│") + strings.Repeat(" ", innerWidth+2) + borderStyle.Render("│") + "\n")
+
+	// Footer
+	modalContent.WriteString(borderStyle.Render("├" + strings.Repeat("─", innerWidth+2) + "┤") + "\n")
+
+	// Keyboard shortcuts
+	footerText := " " + renderShortcut("Enter") + " run, " + renderShortcut("Esc") + " cancel"
+	footerPadding := strings.Repeat(" ", innerWidth+2-len(stripAnsiCodes(footerText)))
+	modalContent.WriteString(borderStyle.Render("│") + footerText + footerPadding + borderStyle.Render("│") + "\n")
+
+	// Bottom border
+	modalContent.WriteString(borderStyle.Render("╰" + strings.Repeat("─", innerWidth+2) + "╯") + "\n")
+
+	// Overlay modal on base view
+	modal := modalContent.String()
+	modalLines := strings.Split(modal, "\n")
+
+	baseLines := strings.Split(dimmedBase, "\n")
+	var result strings.Builder
+
+	// Center modal vertically and horizontally
+	modalHeight := len(modalLines)
+	verticalPadding := (height - modalHeight) / 2
+	if verticalPadding < 0 {
+		verticalPadding = 0
+	}
+
+	for i := 0; i < len(baseLines); i++ {
+		if i >= verticalPadding && i < verticalPadding+modalHeight {
+			modalLineIdx := i - verticalPadding
+			if modalLineIdx < len(modalLines) {
+				// Center modal horizontally
+				leftPadding := (width - modalWidth) / 2
+				if leftPadding < 0 {
+					leftPadding = 0
+				}
+				result.WriteString(strings.Repeat(" ", leftPadding) + modalLines[modalLineIdx])
+			} else {
+				result.WriteString(baseLines[i])
+			}
 		} else {
 			result.WriteString(baseLines[i])
 		}

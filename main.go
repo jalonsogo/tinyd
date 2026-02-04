@@ -79,6 +79,36 @@ const (
 	viewModeInspect
 	viewModePortSelector
 	viewModeStopConfirm
+	viewModeFilter
+)
+
+// Filter types for each tab
+const (
+	// Container filters
+	containerFilterAll = iota
+	containerFilterRunning
+)
+
+const (
+	// Image filters
+	imageFilterAll = iota
+	imageFilterInUse
+	imageFilterUnused
+	imageFilterDangling
+)
+
+const (
+	// Volume filters
+	volumeFilterAll = iota
+	volumeFilterInUse
+	volumeFilterUnused
+)
+
+const (
+	// Network filters
+	networkFilterAll = iota
+	networkFilterInUse
+	networkFilterUnused
 )
 
 // Model represents the application state
@@ -99,7 +129,6 @@ type model struct {
 	loading          bool
 	statusMessage    string
 	actionInProgress bool
-	useDockerDebug   bool // Use 'docker debug' instead of 'docker exec'
 
 	// Detail views
 	currentView       viewMode
@@ -112,6 +141,14 @@ type model struct {
 	// Port selector
 	availablePorts   []string
 	selectedPortIdx  int
+
+	// Filters
+	containerFilter int
+	imageFilter     int
+	volumeFilter    int
+	networkFilter   int
+	filterOptions   []string
+	selectedFilter  int
 
 	// Components
 	header     HeaderComponent
@@ -926,15 +963,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
-		// In modal views (stop confirm, port selector), only allow specific keys
-		if m.currentView == viewModeStopConfirm || m.currentView == viewModePortSelector {
+		// In modal views (stop confirm, port selector, filter), only allow specific keys
+		if m.currentView == viewModeStopConfirm || m.currentView == viewModePortSelector || m.currentView == viewModeFilter {
 			key := msg.String()
 			// Allow quit, ESC, and Enter to pass through to main switch
-			// Allow up/down only for port selector
+			// Allow up/down for port selector and filter modal
 			if key == "ctrl+c" || key == "q" || key == "esc" || key == "enter" {
 				// Pass through to main switch
-			} else if (key == "up" || key == "k" || key == "down" || key == "j") && m.currentView == viewModePortSelector {
-				// Allow navigation in port selector only
+			} else if (key == "up" || key == "k" || key == "down" || key == "j") && (m.currentView == viewModePortSelector || m.currentView == viewModeFilter) {
+				// Allow navigation in port selector and filter modal
 			} else {
 				// Block all other keys in modal views
 				return m, nil
@@ -952,6 +989,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.currentView == viewModePortSelector {
 				if m.selectedPortIdx > 0 {
 					m.selectedPortIdx--
+				}
+			} else if m.currentView == viewModeFilter {
+				// Filter modal navigation
+				if m.selectedFilter > 0 {
+					m.selectedFilter--
 				}
 			} else {
 				// Normal list navigation
@@ -971,6 +1013,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.selectedPortIdx < len(m.availablePorts)-1 {
 					m.selectedPortIdx++
 				}
+			} else if m.currentView == viewModeFilter {
+				// Filter modal navigation
+				if m.selectedFilter < len(m.filterOptions)-1 {
+					m.selectedFilter++
+				}
 			} else {
 				// Normal list navigation
 				maxRow := m.getMaxRow()
@@ -978,9 +1025,19 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.selectedRow++
 					m.statusMessage = "" // Clear status when navigating
 
-					// Scroll down if needed
+					// Calculate maximum scroll to keep viewport full
+					maxScroll := maxRow - m.viewportHeight
+					if maxScroll < 0 {
+						maxScroll = 0
+					}
+
+					// Scroll down if selected row goes beyond visible area
 					if m.selectedRow >= m.scrollOffset+m.viewportHeight {
 						m.scrollOffset = m.selectedRow - m.viewportHeight + 1
+						// Clamp scroll offset to prevent empty space
+						if m.scrollOffset > maxScroll {
+							m.scrollOffset = maxScroll
+						}
 					}
 				}
 			}
@@ -1024,84 +1081,114 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.showHelp = !m.showHelp
 		case "r":
 			// Restart only works on containers tab
-			if m.activeTab == 0 && len(m.containers) > 0 && m.selectedRow < len(m.containers) {
-				selectedContainer := m.containers[m.selectedRow]
-				m.actionInProgress = true
-				m.statusMessage = fmt.Sprintf("Restarting %s...", selectedContainer.Name)
-				return m, restartContainer(m.dockerClient, selectedContainer.ID, selectedContainer.Name)
+			if m.activeTab == 0 {
+				filteredContainers := filterContainers(m.containers, m.containerFilter)
+				if len(filteredContainers) > 0 && m.selectedRow < len(filteredContainers) {
+					selectedContainer := filteredContainers[m.selectedRow]
+					m.actionInProgress = true
+					m.statusMessage = fmt.Sprintf("Restarting %s...", selectedContainer.Name)
+					return m, restartContainer(m.dockerClient, selectedContainer.ID, selectedContainer.Name)
+				}
 			}
 		case "s":
 			// Start/Stop only works on containers tab
-			if m.activeTab == 0 && len(m.containers) > 0 && m.selectedRow < len(m.containers) {
-				selectedContainer := m.containers[m.selectedRow]
-				m.actionInProgress = true
+			if m.activeTab == 0 {
+				filteredContainers := filterContainers(m.containers, m.containerFilter)
+				if len(filteredContainers) > 0 && m.selectedRow < len(filteredContainers) {
+					selectedContainer := filteredContainers[m.selectedRow]
+					m.actionInProgress = true
 
-				if selectedContainer.Status == "RUNNING" {
-					m.statusMessage = fmt.Sprintf("Stopping %s...", selectedContainer.Name)
-					return m, stopContainer(m.dockerClient, selectedContainer.ID, selectedContainer.Name)
-				} else {
-					m.statusMessage = fmt.Sprintf("Starting %s...", selectedContainer.Name)
-					return m, startContainer(m.dockerClient, selectedContainer.ID, selectedContainer.Name)
+					if selectedContainer.Status == "RUNNING" {
+						m.statusMessage = fmt.Sprintf("Stopping %s...", selectedContainer.Name)
+						return m, stopContainer(m.dockerClient, selectedContainer.ID, selectedContainer.Name)
+					} else {
+						m.statusMessage = fmt.Sprintf("Starting %s...", selectedContainer.Name)
+						return m, startContainer(m.dockerClient, selectedContainer.ID, selectedContainer.Name)
+					}
 				}
 			}
 		case "o":
 			// Open browser only works on containers tab
-			if m.activeTab == 0 && len(m.containers) > 0 && m.selectedRow < len(m.containers) {
-				selectedContainer := m.containers[m.selectedRow]
+			if m.activeTab == 0 {
+				filteredContainers := filterContainers(m.containers, m.containerFilter)
+				if len(filteredContainers) > 0 && m.selectedRow < len(filteredContainers) {
+					selectedContainer := filteredContainers[m.selectedRow]
 
-				// Parse ports
-				ports := parsePorts(selectedContainer.Ports)
+					// Parse ports
+					ports := parsePorts(selectedContainer.Ports)
 
-				if len(ports) == 0 {
-					m.statusMessage = "ERROR: No ports exposed"
-				} else if len(ports) == 1 {
-					// Single port - open directly
-					return m, openBrowser(selectedContainer.Ports)
-				} else {
-					// Multiple ports - show selector
-					m.availablePorts = ports
-					m.selectedPortIdx = 0
-					m.currentView = viewModePortSelector
-					m.selectedContainer = &selectedContainer
+					if len(ports) == 0 {
+						m.statusMessage = "ERROR: No ports exposed"
+					} else if len(ports) == 1 {
+						// Single port - open directly
+						return m, openBrowser(selectedContainer.Ports)
+					} else {
+						// Multiple ports - show selector
+						m.availablePorts = ports
+						m.selectedPortIdx = 0
+						m.currentView = viewModePortSelector
+						m.selectedContainer = &selectedContainer
+					}
 				}
 			}
 		case "c":
 			// Open console with toolbar (uses altscreen)
-			if m.activeTab == 0 && len(m.containers) > 0 && m.selectedRow < len(m.containers) {
-				selectedContainer := m.containers[m.selectedRow]
-				if selectedContainer.Status == "RUNNING" {
-					return m, openConsole(selectedContainer.ID, selectedContainer.Name, m.useDockerDebug)
-				} else {
-					m.statusMessage = "ERROR: Container must be running"
-				}
-			}
-		case "d":
-			// Toggle docker debug mode
 			if m.activeTab == 0 {
-				m.useDockerDebug = !m.useDockerDebug
-				if m.useDockerDebug {
-					m.statusMessage = "Console mode: docker debug (enabled)"
-				} else {
-					m.statusMessage = "Console mode: docker exec (default)"
+				filteredContainers := filterContainers(m.containers, m.containerFilter)
+				if len(filteredContainers) > 0 && m.selectedRow < len(filteredContainers) {
+					selectedContainer := filteredContainers[m.selectedRow]
+					if selectedContainer.Status == "RUNNING" {
+						return m, openConsole(selectedContainer.ID, selectedContainer.Name, false)
+					} else {
+						m.statusMessage = "ERROR: Container must be running"
+					}
 				}
 			}
 		case "l":
 			// View logs
-			if m.activeTab == 0 && len(m.containers) > 0 && m.selectedRow < len(m.containers) {
-				selectedContainer := m.containers[m.selectedRow]
-				m.selectedContainer = &selectedContainer
-				m.currentView = viewModeLogs
-				m.logsScrollOffset = 0
-				return m, getContainerLogs(m.dockerClient, selectedContainer.ID)
+			if m.activeTab == 0 {
+				filteredContainers := filterContainers(m.containers, m.containerFilter)
+				if len(filteredContainers) > 0 && m.selectedRow < len(filteredContainers) {
+					selectedContainer := filteredContainers[m.selectedRow]
+					m.selectedContainer = &selectedContainer
+					m.currentView = viewModeLogs
+					m.logsScrollOffset = 0
+					return m, getContainerLogs(m.dockerClient, selectedContainer.ID)
+				}
 			}
 		case "i":
 			// Inspect container
-			if m.activeTab == 0 && len(m.containers) > 0 && m.selectedRow < len(m.containers) {
-				selectedContainer := m.containers[m.selectedRow]
-				m.selectedContainer = &selectedContainer
-				m.currentView = viewModeInspect
-				m.inspectMode = 0
-				return m, inspectContainer(m.dockerClient, selectedContainer.ID)
+			if m.activeTab == 0 {
+				filteredContainers := filterContainers(m.containers, m.containerFilter)
+				if len(filteredContainers) > 0 && m.selectedRow < len(filteredContainers) {
+					selectedContainer := filteredContainers[m.selectedRow]
+					m.selectedContainer = &selectedContainer
+					m.currentView = viewModeInspect
+					m.inspectMode = 0
+					return m, inspectContainer(m.dockerClient, selectedContainer.ID)
+				}
+			}
+		case "f":
+			// Open filter modal
+			if m.currentView == viewModeList {
+				m.currentView = viewModeFilter
+				m.selectedFilter = 0
+
+				// Set filter options based on active tab
+				switch m.activeTab {
+				case 0: // Containers
+					m.filterOptions = []string{"All", "Running"}
+					m.selectedFilter = m.containerFilter
+				case 1: // Images
+					m.filterOptions = []string{"All", "In Use", "Unused", "Dangling"}
+					m.selectedFilter = m.imageFilter
+				case 2: // Volumes
+					m.filterOptions = []string{"All", "In Use", "Unused"}
+					m.selectedFilter = m.volumeFilter
+				case 3: // Networks
+					m.filterOptions = []string{"All", "In Use", "Unused"}
+					m.selectedFilter = m.networkFilter
+				}
 			}
 		case "esc":
 			// Return to list view
@@ -1129,22 +1216,58 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, openBrowserPort(selectedPort)
 			}
 
-			// In containers tab, start/stop container
-			if m.currentView == viewModeList && m.activeTab == 0 && len(m.containers) > 0 && m.selectedRow < len(m.containers) {
-				container := m.containers[m.selectedRow]
-				m.selectedContainer = &container
-
-				if container.Status == "RUNNING" {
-					// Show confirmation modal before stopping
-					m.currentView = viewModeStopConfirm
-					return m, nil
-				} else if container.Status == "STOPPED" {
-					// Start directly without confirmation
-					return m, startContainer(m.dockerClient, container.ID, container.Name)
+			// In filter modal, apply selected filter
+			if m.currentView == viewModeFilter && len(m.filterOptions) > 0 {
+				// Update filter for current tab
+				switch m.activeTab {
+				case 0: // Containers
+					m.containerFilter = m.selectedFilter
+					if m.selectedFilter == containerFilterRunning {
+						m.statusMessage = "Filter: Running containers"
+					} else {
+						m.statusMessage = "Filter: All containers"
+					}
+				case 1: // Images
+					m.imageFilter = m.selectedFilter
+					switch m.selectedFilter {
+					case imageFilterInUse:
+						m.statusMessage = "Filter: In use images"
+					case imageFilterUnused:
+						m.statusMessage = "Filter: Unused images"
+					case imageFilterDangling:
+						m.statusMessage = "Filter: Dangling images"
+					default:
+						m.statusMessage = "Filter: All images"
+					}
+				case 2: // Volumes
+					m.volumeFilter = m.selectedFilter
+					if m.selectedFilter == volumeFilterInUse {
+						m.statusMessage = "Filter: In use volumes"
+					} else if m.selectedFilter == volumeFilterUnused {
+						m.statusMessage = "Filter: Unused volumes"
+					} else {
+						m.statusMessage = "Filter: All volumes"
+					}
+				case 3: // Networks
+					m.networkFilter = m.selectedFilter
+					if m.selectedFilter == networkFilterInUse {
+						m.statusMessage = "Filter: In use networks"
+					} else if m.selectedFilter == networkFilterUnused {
+						m.statusMessage = "Filter: Unused networks"
+					} else {
+						m.statusMessage = "Filter: All networks"
+					}
 				}
+
+				// Reset selection and scroll
+				m.selectedRow = 0
+				m.scrollOffset = 0
+				m.currentView = viewModeList
+				m.filterOptions = nil
+				return m, nil // IMPORTANT: Return here to prevent fall-through to container actions
 			}
 
-			// Otherwise, refresh current tab
+			// Refresh current tab
 			if m.currentView == viewModeList {
 				m.statusMessage = "Refreshing..."
 				switch m.activeTab {
@@ -1163,6 +1286,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+
+		// Calculate viewport height based on terminal height
+		// Fixed UI elements: tabs (3 lines) + table header (2 lines) + action bar (2 lines) = 7 lines
+		// Reserve 1 line for safety margin
+		fixedLines := 8
+		m.viewportHeight = msg.Height - fixedLines
+		if m.viewportHeight < 5 {
+			m.viewportHeight = 5 // Minimum height to show something
+		}
+
 		// Update components with new width
 		m.header = m.header.WithWidth(m.width)
 		m.tabs = m.tabs.WithWidth(m.width)
@@ -1245,17 +1378,21 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// Get max row count for current tab
+// Get max row count for current tab (accounting for filters)
 func (m model) getMaxRow() int {
 	switch m.activeTab {
 	case 0:
-		return len(m.containers)
+		filteredContainers := filterContainers(m.containers, m.containerFilter)
+		return len(filteredContainers)
 	case 1:
-		return len(m.images)
+		filteredImages := filterImages(m.images, m.containers, m.imageFilter)
+		return len(filteredImages)
 	case 2:
-		return len(m.volumes)
+		filteredVolumes := filterVolumes(m.volumes, m.containers, m.dockerClient)
+		return len(filteredVolumes)
 	case 3:
-		return len(m.networks)
+		filteredNetworks := filterNetworks(m.networks, m.containers, m.dockerClient)
+		return len(filteredNetworks)
 	}
 	return 0
 }
@@ -1334,21 +1471,90 @@ func (m model) renderTabs() string {
 // Get visible items range for current viewport
 func (m model) getVisibleRange() (start, end int) {
 	total := m.getMaxRow()
-
-	// Always try to show exactly viewportHeight rows
 	start = m.scrollOffset
-	end = start + m.viewportHeight
+	end = m.scrollOffset + m.viewportHeight
 
-	// If we're near the end and would show fewer rows, adjust start
+	// Clamp to actual item count
 	if end > total {
 		end = total
-		start = end - m.viewportHeight
-		if start < 0 {
-			start = 0
-		}
+	}
+	if start > total {
+		start = total
 	}
 
 	return start, end
+}
+
+// Add filter indicator to tab bar
+func (m model) addFilterIndicator(tabsView string, filterName string, width int) string {
+	lines := strings.Split(tabsView, "\n")
+	if len(lines) < 2 {
+		return tabsView
+	}
+
+	// Style for filter indicator (no background to inherit from tab bar)
+	filterStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#CCCCCC"))
+
+	fStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#FFFFFF")).
+		Underline(true)
+
+	// Build filter text: ≡ Filter: {selection}
+	filterText := "≡ " + fStyle.Render("F") + filterStyle.Render("ilter: " + filterName)
+
+	// Calculate position for second line (tab labels row)
+	labelLine := lines[1]
+	// Strip ANSI codes to get actual length
+	labelLineClean := stripAnsi(labelLine)
+	currentLen := len(labelLineClean)
+
+	// Calculate spaces needed to push filter to the right (leave 1 space padding from edge)
+	filterTextClean := "≡ Filter: " + filterName
+	spacesNeeded := width - currentLen - len(filterTextClean) - 1
+
+	if spacesNeeded > 0 {
+		lines[1] = labelLine + strings.Repeat(" ", spacesNeeded) + filterText
+	}
+
+	return strings.Join(lines, "\n")
+}
+
+// Render keyboard shortcut with underscored first letter in white
+func renderShortcut(key string) string {
+	if len(key) == 0 {
+		return key
+	}
+
+	firstLetterStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#FFFFFF")).
+		Underline(true)
+
+	restStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#CCCCCC"))
+
+	firstLetter := string(key[0])
+	rest := ""
+	if len(key) > 1 {
+		rest = key[1:]
+	}
+
+	return firstLetterStyle.Render(firstLetter) + restStyle.Render(rest)
+}
+
+// Strip ANSI escape codes for length calculation
+func stripAnsi(str string) string {
+	result := str
+	// Remove any ANSI escape sequences
+	for strings.Contains(result, "\x1b[") {
+		start := strings.Index(result, "\x1b[")
+		end := strings.Index(result[start:], "m")
+		if end == -1 {
+			break
+		}
+		result = result[:start] + result[start+end+1:]
+	}
+	return result
 }
 
 // Get scroll position indicator string
@@ -1386,6 +1592,8 @@ func (m model) View() string {
 		return m.renderPortSelector()
 	case viewModeStopConfirm:
 		return m.renderStopConfirm()
+	case viewModeFilter:
+		return m.renderFilterModal()
 	}
 
 	// Render based on active tab (list view)
@@ -1418,7 +1626,18 @@ func (m model) renderContainers() string {
 
 	// Tabs component with responsive width
 	tabs := m.tabs.SetActiveTab(m.activeTab).WithWidth(width)
-	b.WriteString(tabs.View())
+	tabsView := tabs.View()
+
+	// Add filter indicator (always visible)
+	filterName := "All"
+	if m.containerFilter == containerFilterRunning {
+		filterName = "Running"
+	}
+	tabsView = m.addFilterIndicator(tabsView, filterName, width)
+	b.WriteString(tabsView)
+
+	// Apply filter to containers
+	filteredContainers := filterContainers(m.containers, m.containerFilter)
 
 	// Status line component with responsive width
 	runningCount := 0
@@ -1428,7 +1647,7 @@ func (m model) renderContainers() string {
 		}
 	}
 	statusLabel := fmt.Sprintf("CONTAINERS (%d total, %d running)", len(m.containers), runningCount)
-	statusComp := NewStatusLineComponent(statusLabel, len(m.containers)).WithWidth(width)
+	statusComp := NewStatusLineComponent(statusLabel, len(filteredContainers)).WithWidth(width)
 	statusComp = statusComp.SetScrollIndicator(m.getScrollIndicator())
 	b.WriteString(statusComp.View())
 
@@ -1471,9 +1690,9 @@ func (m model) renderContainers() string {
 
 	table := NewTableComponent(headers).WithWidth(width)
 
-	if !m.loading && len(m.containers) > 0 {
+	if !m.loading && len(filteredContainers) > 0 {
 		var rows []TableRow
-		for i, container := range m.containers {
+		for i, container := range filteredContainers {
 			isStopped := container.Status == "STOPPED"
 			rowStyle := normalStyle
 			if isStopped {
@@ -1534,24 +1753,18 @@ func (m model) renderContainers() string {
 
 	// Action bar component
 	m.actionBar = m.actionBar.SetStatusMessage(m.statusMessage)
-	if m.statusMessage == "" && len(m.containers) > 0 && m.selectedRow < len(m.containers) {
-		selectedContainer := m.containers[m.selectedRow]
+	if m.statusMessage == "" && len(filteredContainers) > 0 && m.selectedRow < len(filteredContainers) {
+		selectedContainer := filteredContainers[m.selectedRow]
 		var actions string
 		if selectedContainer.Status == "RUNNING" {
-			consoleMode := "exec"
-			if m.useDockerDebug {
-				consoleMode = "debug"
-			}
-			actions = fmt.Sprintf(" Enter: Stop | [S]top | [R]estart | [C]onsole (%s) | [D]ebug toggle", consoleMode)
+			actions = " " + renderShortcut("Stop") + " | " + renderShortcut("Restart") + " | " + renderShortcut("Console")
 		} else if selectedContainer.Status == "STOPPED" {
-			actions = " Enter: Start | [S]tart | [D]ebug toggle"
-		} else {
-			actions = " [D]ebug toggle"
+			actions = " " + renderShortcut("Start")
 		}
 		if selectedContainer.Ports != "" && selectedContainer.Ports != "--" {
-			actions += " | [O]pen"
+			actions += " | " + renderShortcut("Open")
 		}
-		actions += " | [L]ogs | [I]nspect"
+		actions += " | " + renderShortcut("Logs") + " | " + renderShortcut("Inspect")
 		m.actionBar = m.actionBar.SetActions(actions)
 	} else {
 		m.actionBar = m.actionBar.SetActions("")
@@ -1577,10 +1790,27 @@ func (m model) renderImages() string {
 
 	// Tabs component with responsive width
 	tabs := m.tabs.SetActiveTab(m.activeTab).WithWidth(width)
-	b.WriteString(tabs.View())
+	tabsView := tabs.View()
+
+	// Apply filter to images
+	filteredImages := filterImages(m.images, m.containers, m.imageFilter)
+
+	// Add filter indicator (always visible)
+	filterName := "All"
+	switch m.imageFilter {
+	case imageFilterInUse:
+		filterName = "In Use"
+	case imageFilterUnused:
+		filterName = "Unused"
+	case imageFilterDangling:
+		filterName = "Dangling"
+	}
+	tabsView = m.addFilterIndicator(tabsView, filterName, width)
+	b.WriteString(tabsView)
 
 	// Status line component with responsive width
-	statusComp := NewStatusLineComponent("IMAGES", len(m.images)).WithWidth(width)
+	statusLabel := fmt.Sprintf("IMAGES (%d total)", len(m.images))
+	statusComp := NewStatusLineComponent(statusLabel, len(filteredImages)).WithWidth(width)
 	statusComp = statusComp.SetScrollIndicator(m.getScrollIndicator())
 	b.WriteString(statusComp.View())
 
@@ -1617,17 +1847,20 @@ func (m model) renderImages() string {
 		{Label: "Created", Width: createdWidth, AlignRight: false},
 	}
 
-	var rows []TableRow
-	if m.loading {
-		// Empty rows array will show "No items found" message
-	} else {
-		start, end := m.getVisibleRange()
-		for i := start; i < end && i < len(m.images); i++ {
-			image := m.images[i]
+	table := NewTableComponent(headers).WithWidth(width)
+
+	if !m.loading && len(filteredImages) > 0 {
+		var rows []TableRow
+		for i, image := range filteredImages {
 			isSelected := i == m.selectedRow
 
-			// Status dot (gray for now, could be green if in use)
-			statusDot := grayStyle.Render("●")
+			// Status dot - green if in use by containers, gray otherwise
+			var statusDot string
+			if isImageInUse(image, m.containers) {
+				statusDot = greenStyle.Render("●")
+			} else {
+				statusDot = grayStyle.Render("●")
+			}
 
 			// Truncate if needed
 			repoCell := image.Repository
@@ -1667,16 +1900,17 @@ func (m model) renderImages() string {
 				Style:      normalStyle,
 			})
 		}
+		table = table.SetRows(rows)
 	}
 
-	table := NewTableComponent(headers).WithWidth(width)
-	table = table.SetRows(rows)
 	start, end := m.getVisibleRange()
 	table = table.SetVisibleRange(start, end)
 	b.WriteString(table.View())
 
 	// Action bar component with responsive width
-	actionBar := m.actionBar.SetStatusMessage(m.statusMessage).WithWidth(width)
+	m.actionBar = m.actionBar.SetStatusMessage(m.statusMessage)
+	m.actionBar = m.actionBar.SetActions("")
+	actionBar := m.actionBar.WithWidth(width)
 	b.WriteString(actionBar.View())
 
 	return containerStyle.Render(b.String())
@@ -1697,10 +1931,25 @@ func (m model) renderVolumes() string {
 
 	// Tabs component with responsive width
 	tabs := m.tabs.SetActiveTab(m.activeTab).WithWidth(width)
-	b.WriteString(tabs.View())
+	tabsView := tabs.View()
+
+	// Apply filter to volumes
+	filteredVolumes := filterVolumes(m.volumes, m.containers, m.dockerClient)
+
+	// Add filter indicator (always visible)
+	filterName := "All"
+	switch m.volumeFilter {
+	case volumeFilterInUse:
+		filterName = "In Use"
+	case volumeFilterUnused:
+		filterName = "Unused"
+	}
+	tabsView = m.addFilterIndicator(tabsView, filterName, width)
+	b.WriteString(tabsView)
 
 	// Status line component with responsive width
-	statusComp := NewStatusLineComponent("VOLUMES", len(m.volumes)).WithWidth(width)
+	statusLabel := fmt.Sprintf("VOLUMES (%d total)", len(m.volumes))
+	statusComp := NewStatusLineComponent(statusLabel, len(filteredVolumes)).WithWidth(width)
 	statusComp = statusComp.SetScrollIndicator(m.getScrollIndicator())
 	b.WriteString(statusComp.View())
 
@@ -1739,13 +1988,11 @@ func (m model) renderVolumes() string {
 		{Label: "Created", Width: createdWidth, AlignRight: false},
 	}
 
-	var rows []TableRow
-	if m.loading {
-		// Empty rows array will show "No items found" message
-	} else {
-		start, end := m.getVisibleRange()
-		for i := start; i < end && i < len(m.volumes); i++ {
-			volume := m.volumes[i]
+	table := NewTableComponent(headers).WithWidth(width)
+
+	if !m.loading && len(filteredVolumes) > 0 {
+		var rows []TableRow
+		for i, volume := range filteredVolumes {
 			isSelected := i == m.selectedRow
 
 			// Status dot (gray for now)
@@ -1789,16 +2036,17 @@ func (m model) renderVolumes() string {
 				Style:      normalStyle,
 			})
 		}
+		table = table.SetRows(rows)
 	}
 
-	table := NewTableComponent(headers).WithWidth(width)
-	table = table.SetRows(rows)
 	start, end := m.getVisibleRange()
 	table = table.SetVisibleRange(start, end)
 	b.WriteString(table.View())
 
 	// Action bar component with responsive width
-	actionBar := m.actionBar.SetStatusMessage(m.statusMessage).WithWidth(width)
+	m.actionBar = m.actionBar.SetStatusMessage(m.statusMessage)
+	m.actionBar = m.actionBar.SetActions("")
+	actionBar := m.actionBar.WithWidth(width)
 	b.WriteString(actionBar.View())
 
 	return containerStyle.Render(b.String())
@@ -1819,10 +2067,25 @@ func (m model) renderNetworks() string {
 
 	// Tabs component with responsive width
 	tabs := m.tabs.SetActiveTab(m.activeTab).WithWidth(width)
-	b.WriteString(tabs.View())
+	tabsView := tabs.View()
+
+	// Apply filter to networks
+	filteredNetworks := filterNetworks(m.networks, m.containers, m.dockerClient)
+
+	// Add filter indicator (always visible)
+	filterName := "All"
+	switch m.networkFilter {
+	case networkFilterInUse:
+		filterName = "In Use"
+	case networkFilterUnused:
+		filterName = "Unused"
+	}
+	tabsView = m.addFilterIndicator(tabsView, filterName, width)
+	b.WriteString(tabsView)
 
 	// Status line component with responsive width
-	statusComp := NewStatusLineComponent("NETWORKS", len(m.networks)).WithWidth(width)
+	statusLabel := fmt.Sprintf("NETWORKS (%d total)", len(m.networks))
+	statusComp := NewStatusLineComponent(statusLabel, len(filteredNetworks)).WithWidth(width)
 	statusComp = statusComp.SetScrollIndicator(m.getScrollIndicator())
 	b.WriteString(statusComp.View())
 
@@ -1861,13 +2124,11 @@ func (m model) renderNetworks() string {
 		{Label: "IPv6", Width: ipv6Width, AlignRight: false},
 	}
 
-	var rows []TableRow
-	if m.loading {
-		// Empty rows array will show "No items found" message
-	} else {
-		start, end := m.getVisibleRange()
-		for i := start; i < end && i < len(m.networks); i++ {
-			network := m.networks[i]
+	table := NewTableComponent(headers).WithWidth(width)
+
+	if !m.loading && len(filteredNetworks) > 0 {
+		var rows []TableRow
+		for i, network := range filteredNetworks {
 			isSelected := i == m.selectedRow
 
 			// Status dot (gray for now)
@@ -1917,17 +2178,17 @@ func (m model) renderNetworks() string {
 				Style:      normalStyle,
 			})
 		}
+		table = table.SetRows(rows)
 	}
 
-	table := NewTableComponent(headers).WithWidth(width)
-	table = table.SetRows(rows)
 	start, end := m.getVisibleRange()
 	table = table.SetVisibleRange(start, end)
 	b.WriteString(table.View())
 
 	// Action bar component with responsive width
+	m.actionBar = m.actionBar.SetStatusMessage(m.statusMessage)
+	m.actionBar = m.actionBar.SetActions("")
 	actionBar := m.actionBar.WithWidth(width)
-	actionBar = actionBar.SetStatusMessage(m.statusMessage)
 	b.WriteString(actionBar.View())
 
 	return containerStyle.Render(b.String())
@@ -1990,65 +2251,89 @@ func (m model) renderPortSelector() string {
 		containerName = m.selectedContainer.Name
 	}
 
-	// Dim the base view by applying a gray style
+	// Dim the base view
 	dimStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#666666"))
 
 	dimmedBase := dimStyle.Render(baseView)
 
-	// Modal border style with solid background
-	modalWidth := 44
+	// Modal dimensions
+	modalWidth := 50
 	if modalWidth > width-10 {
 		modalWidth = width - 10
 	}
 
-	modalStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#FFFF00")).
-		Background(lipgloss.Color("#000000")).
-		Foreground(lipgloss.Color("#FFFFFF")).
-		Padding(1, 2).
-		Width(modalWidth)
-
-	// Build modal content
+	// Build modal with box-drawing characters
 	var modalContent strings.Builder
 
+	borderColor := lipgloss.Color("#666666")
+	textColor := lipgloss.Color("#CCCCCC")
+	selectedColor := lipgloss.Color("#FFFFFF")
+
+	borderStyle := lipgloss.NewStyle().Foreground(borderColor)
+	textStyle := lipgloss.NewStyle().Foreground(textColor)
+	selectedStyle := lipgloss.NewStyle().Foreground(selectedColor).Bold(true)
+
+	// Calculate inner width
+	innerWidth := modalWidth - 4
+
+	title := fmt.Sprintf(" Select Port - %s", containerName)
+	if len(title) > innerWidth+1 {
+		title = title[:innerWidth-2] + "..."
+	}
+
+	// Top border
+	modalContent.WriteString(borderStyle.Render("╭" + strings.Repeat("─", innerWidth+2) + "╮") + "\n")
+
 	// Title
-	title := fmt.Sprintf("Select Port - %s", containerName)
-	maxTitleWidth := modalWidth - 4
-	if len(title) > maxTitleWidth {
-		title = title[:maxTitleWidth-3] + "..."
-	}
-	modalContent.WriteString(cyanStyle.Bold(true).Render(title) + "\n\n")
+	titlePadding := innerWidth - len(title) + 2
+	modalContent.WriteString(borderStyle.Render("│") + textStyle.Render(title) + strings.Repeat(" ", titlePadding) + borderStyle.Render("│") + "\n")
 
-	// Port list
+	// Divider
+	modalContent.WriteString(borderStyle.Render("├" + strings.Repeat("─", innerWidth+2) + "┤") + "\n")
+
+	// Empty line
+	modalContent.WriteString(borderStyle.Render("│") + strings.Repeat(" ", innerWidth+2) + borderStyle.Render("│") + "\n")
+
+	// Port list with triangle indicator for single choice
 	for i, port := range m.availablePorts {
-		prefix := "  "
-		style := normalStyle
+		portLine := fmt.Sprintf("localhost:%s", port)
+		var optionLine string
 		if i == m.selectedPortIdx {
-			prefix = "► "
-			style = yellowStyle.Bold(true)
+			// Selected option with triangle
+			optionLine = " ▶ " + portLine
+			optionText := selectedStyle.Render(optionLine)
+			padding := innerWidth - len(optionLine) + 2
+			modalContent.WriteString(borderStyle.Render("│") + optionText + strings.Repeat(" ", padding) + borderStyle.Render("│") + "\n")
+		} else {
+			// Unselected option with spaces
+			optionLine = "   " + portLine
+			optionText := textStyle.Render(optionLine)
+			padding := innerWidth - len(optionLine) + 2
+			modalContent.WriteString(borderStyle.Render("│") + optionText + strings.Repeat(" ", padding) + borderStyle.Render("│") + "\n")
 		}
-
-		portLine := fmt.Sprintf("%slocalhost:%s", prefix, port)
-		modalContent.WriteString(style.Render(portLine) + "\n")
 	}
 
-	// Controls
-	modalContent.WriteString("\n")
-	modalContent.WriteString(grayStyle.Render("↑↓:Navigate  ENTER:Open  ESC:Cancel"))
+	// Empty line
+	modalContent.WriteString(borderStyle.Render("│") + strings.Repeat(" ", innerWidth+2) + borderStyle.Render("│") + "\n")
 
-	// Render styled modal
-	modal := modalStyle.Render(modalContent.String())
+	// Footer with keyboard shortcuts
+	footerText := " ↑/↓ navigate, " + renderShortcut("Enter") + " select-open, " + renderShortcut("Esc") + " exit"
+	footerClean := " ↑/↓ navigate, Enter select-open, Esc exit"
+	footerPadding := innerWidth - len(footerClean) + 2
+	modalContent.WriteString(borderStyle.Render("│") + footerText + strings.Repeat(" ", footerPadding) + borderStyle.Render("│") + "\n")
 
-	// Create layers using Lipgloss with responsive dimensions
-	// Layer 1: Dimmed base view
+	// Bottom border
+	modalContent.WriteString(borderStyle.Render("╰" + strings.Repeat("─", innerWidth+2) + "╯"))
+
+	modal := modalContent.String()
+
+	// Create layers
 	baseLayer := lipgloss.NewStyle().
 		Width(width).
 		Height(height).
 		Render(dimmedBase)
 
-	// Layer 2: Modal centered on top
 	modalPlaced := lipgloss.Place(
 		width, height,
 		lipgloss.Center, lipgloss.Center,
@@ -2057,14 +2342,139 @@ func (m model) renderPortSelector() string {
 		lipgloss.WithWhitespaceForeground(lipgloss.NoColor{}),
 	)
 
-	// Composite the layers: base + modal overlay
-	// Split into lines and overlay
+	// Composite the layers
 	baseLines := strings.Split(baseLayer, "\n")
 	modalLines := strings.Split(modalPlaced, "\n")
 
 	var result strings.Builder
 	for i := 0; i < len(baseLines) && i < len(modalLines); i++ {
-		// If modal line has content (non-space), use it; otherwise use base
+		if strings.TrimSpace(modalLines[i]) != "" {
+			result.WriteString(modalLines[i])
+		} else {
+			result.WriteString(baseLines[i])
+		}
+		result.WriteString("\n")
+	}
+
+	return result.String()
+}
+
+func (m model) renderFilterModal() string {
+	// Use responsive dimensions
+	width := m.width
+	if width < 60 {
+		width = 60
+	}
+	height := m.height
+	if height < 20 {
+		height = 20
+	}
+
+	// Render base view based on active tab
+	var baseView string
+	switch m.activeTab {
+	case 0:
+		baseView = m.renderContainers()
+	case 1:
+		baseView = m.renderImages()
+	case 2:
+		baseView = m.renderVolumes()
+	case 3:
+		baseView = m.renderNetworks()
+	}
+
+	// Dim the base view
+	dimStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#666666"))
+
+	dimmedBase := dimStyle.Render(baseView)
+
+	// Modal dimensions
+	modalWidth := 50
+	if modalWidth > width-10 {
+		modalWidth = width - 10
+	}
+
+	// Build modal with box-drawing characters
+	var modalContent strings.Builder
+
+	borderColor := lipgloss.Color("#666666")
+	textColor := lipgloss.Color("#CCCCCC")
+	selectedColor := lipgloss.Color("#FFFFFF")
+
+	borderStyle := lipgloss.NewStyle().Foreground(borderColor)
+	textStyle := lipgloss.NewStyle().Foreground(textColor)
+	selectedStyle := lipgloss.NewStyle().Foreground(selectedColor).Bold(true)
+
+	// Calculate inner width
+	innerWidth := modalWidth - 4
+
+	// Top border
+	modalContent.WriteString(borderStyle.Render("╭" + strings.Repeat("─", innerWidth+2) + "╮") + "\n")
+
+	// Title
+	title := " Filter"
+	titlePadding := innerWidth - len(title) + 1
+	modalContent.WriteString(borderStyle.Render("│") + textStyle.Render(title) + strings.Repeat(" ", titlePadding) + borderStyle.Render("│") + "\n")
+
+	// Divider
+	modalContent.WriteString(borderStyle.Render("├" + strings.Repeat("─", innerWidth+2) + "┤") + "\n")
+
+	// Empty line
+	modalContent.WriteString(borderStyle.Render("│") + strings.Repeat(" ", innerWidth+2) + borderStyle.Render("│") + "\n")
+
+	// Filter options with checkbox style
+	for i, option := range m.filterOptions {
+		var optionLine string
+		if i == m.selectedFilter {
+			// Selected option with checkbox
+			optionLine = " [✓] " + option
+			optionText := selectedStyle.Render(optionLine)
+			padding := innerWidth - len(optionLine) + 2
+			modalContent.WriteString(borderStyle.Render("│") + optionText + strings.Repeat(" ", padding) + borderStyle.Render("│") + "\n")
+		} else {
+			// Unselected option with empty checkbox
+			optionLine = " [ ] " + option
+			optionText := textStyle.Render(optionLine)
+			padding := innerWidth - len(optionLine) + 2
+			modalContent.WriteString(borderStyle.Render("│") + optionText + strings.Repeat(" ", padding) + borderStyle.Render("│") + "\n")
+		}
+	}
+
+	// Empty line
+	modalContent.WriteString(borderStyle.Render("│") + strings.Repeat(" ", innerWidth+2) + borderStyle.Render("│") + "\n")
+
+	// Footer with keyboard shortcuts
+	footerText := " ↑/↓ navigate, " + renderShortcut("Enter") + " select-apply, " + renderShortcut("Esc") + " exit"
+	footerClean := " ↑/↓ navigate, Enter select-apply, Esc exit"
+	footerPadding := innerWidth - len(footerClean) + 2
+	modalContent.WriteString(borderStyle.Render("│") + footerText + strings.Repeat(" ", footerPadding) + borderStyle.Render("│") + "\n")
+
+	// Bottom border
+	modalContent.WriteString(borderStyle.Render("╰" + strings.Repeat("─", innerWidth+2) + "╯"))
+
+	modal := modalContent.String()
+
+	// Create layers using Lipgloss with responsive dimensions
+	baseLayer := lipgloss.NewStyle().
+		Width(width).
+		Height(height).
+		Render(dimmedBase)
+
+	modalPlaced := lipgloss.Place(
+		width, height,
+		lipgloss.Center, lipgloss.Center,
+		modal,
+		lipgloss.WithWhitespaceChars(" "),
+		lipgloss.WithWhitespaceForeground(lipgloss.NoColor{}),
+	)
+
+	// Composite the layers
+	baseLines := strings.Split(baseLayer, "\n")
+	modalLines := strings.Split(modalPlaced, "\n")
+
+	var result strings.Builder
+	for i := 0; i < len(baseLines) && i < len(modalLines); i++ {
 		if strings.TrimSpace(modalLines[i]) != "" {
 			result.WriteString(modalLines[i])
 		} else {
@@ -2095,70 +2505,81 @@ func (m model) renderStopConfirm() string {
 		containerName = m.selectedContainer.Name
 	}
 
-	// Dim the base view by applying a gray style
+	// Dim the base view
 	dimStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#666666"))
 
 	dimmedBase := dimStyle.Render(baseView)
 
-	// Modal border style with solid background
+	// Modal dimensions
 	modalWidth := 50
 	if modalWidth > width-10 {
 		modalWidth = width - 10
 	}
 
-	modalStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#FFFF00")).
-		Background(lipgloss.Color("#0a0a0a")).
-		Foreground(lipgloss.Color("#FFFFFF")).
-		Padding(1, 2).
-		Width(modalWidth)
-
-	// Build modal content
+	// Build modal with box-drawing characters
 	var modalContent strings.Builder
 
+	borderColor := lipgloss.Color("#666666")
+	textColor := lipgloss.Color("#CCCCCC")
+	warningColor := lipgloss.Color("#FFFFFF")
+	subTextColor := lipgloss.Color("#999999")
+
+	borderStyle := lipgloss.NewStyle().Foreground(borderColor)
+	textStyle := lipgloss.NewStyle().Foreground(textColor)
+	warningStyle := lipgloss.NewStyle().Foreground(warningColor)
+	subStyle := lipgloss.NewStyle().Foreground(subTextColor)
+
+	// Calculate inner width
+	innerWidth := modalWidth - 4
+
+	// Top border
+	modalContent.WriteString(borderStyle.Render("╭" + strings.Repeat("─", innerWidth+2) + "╮") + "\n")
+
 	// Title
-	title := "⚠ Warning"
-	titleStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#FFFF00")).
-		Background(lipgloss.Color("#0a0a0a")).
-		Bold(true)
-	modalContent.WriteString(titleStyle.Render(title) + "\n\n")
+	title := " ⚠ Stop Container"
+	titlePadding := innerWidth - len(title) + 2
+	modalContent.WriteString(borderStyle.Render("│") + textStyle.Render(title) + strings.Repeat(" ", titlePadding) + borderStyle.Render("│") + "\n")
+
+	// Divider
+	modalContent.WriteString(borderStyle.Render("├" + strings.Repeat("─", innerWidth+2) + "┤") + "\n")
+
+	// Empty line
+	modalContent.WriteString(borderStyle.Render("│") + strings.Repeat(" ", innerWidth+2) + borderStyle.Render("│") + "\n")
 
 	// Warning message
-	warningText := fmt.Sprintf("Stop container '%s'?", containerName)
-	if len(warningText) > modalWidth-4 {
-		warningText = warningText[:modalWidth-7] + "..."
+	warningText := fmt.Sprintf(" Stop container '%s'?", containerName)
+	if len(warningText) > innerWidth+1 {
+		warningText = warningText[:innerWidth-2] + "..."
 	}
-	warningStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#FFFFFF")).
-		Background(lipgloss.Color("#0a0a0a"))
-	modalContent.WriteString(warningStyle.Render(warningText) + "\n")
+	warningPadding := innerWidth - len(warningText) + 2
+	modalContent.WriteString(borderStyle.Render("│") + warningStyle.Render(warningText) + strings.Repeat(" ", warningPadding) + borderStyle.Render("│") + "\n")
 
-	subText := "This will stop the running container."
-	subStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#666666")).
-		Background(lipgloss.Color("#0a0a0a"))
-	modalContent.WriteString(subStyle.Render(subText) + "\n\n")
+	// Sub text
+	subText := " This will stop the running container."
+	subPadding := innerWidth - len(subText) + 2
+	modalContent.WriteString(borderStyle.Render("│") + subStyle.Render(subText) + strings.Repeat(" ", subPadding) + borderStyle.Render("│") + "\n")
 
-	// Controls
-	controlStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#00FFFF")).
-		Background(lipgloss.Color("#0a0a0a"))
-	modalContent.WriteString(controlStyle.Render("ENTER: Confirm  ESC: Cancel"))
+	// Empty line
+	modalContent.WriteString(borderStyle.Render("│") + strings.Repeat(" ", innerWidth+2) + borderStyle.Render("│") + "\n")
 
-	// Render styled modal
-	modal := modalStyle.Render(modalContent.String())
+	// Footer with keyboard shortcuts
+	footerText := " " + renderShortcut("Enter") + " confirm-stop, " + renderShortcut("Esc") + " exit"
+	footerClean := " Enter confirm-stop, Esc exit"
+	footerPadding := innerWidth - len(footerClean) + 2
+	modalContent.WriteString(borderStyle.Render("│") + footerText + strings.Repeat(" ", footerPadding) + borderStyle.Render("│") + "\n")
 
-	// Create layers using Lipgloss with responsive dimensions
-	// Layer 1: Dimmed base view
+	// Bottom border
+	modalContent.WriteString(borderStyle.Render("╰" + strings.Repeat("─", innerWidth+2) + "╯"))
+
+	modal := modalContent.String()
+
+	// Create layers
 	baseLayer := lipgloss.NewStyle().
 		Width(width).
 		Height(height).
 		Render(dimmedBase)
 
-	// Layer 2: Modal centered on top
 	modalPlaced := lipgloss.Place(
 		width, height,
 		lipgloss.Center, lipgloss.Center,
@@ -2167,14 +2588,12 @@ func (m model) renderStopConfirm() string {
 		lipgloss.WithWhitespaceForeground(lipgloss.NoColor{}),
 	)
 
-	// Composite the layers: base + modal overlay
-	// Split into lines and overlay
+	// Composite the layers
 	baseLines := strings.Split(baseLayer, "\n")
 	modalLines := strings.Split(modalPlaced, "\n")
 
 	var result strings.Builder
 	for i := 0; i < len(baseLines) && i < len(modalLines); i++ {
-		// If modal line has content (non-space), use it; otherwise use base
 		if strings.TrimSpace(modalLines[i]) != "" {
 			result.WriteString(modalLines[i])
 		} else {
@@ -2304,12 +2723,14 @@ func (m model) renderHelp() string {
 	renderLine("  s        - Start/Stop selected container", textStyle)
 	renderLine("  r        - Restart selected container", textStyle)
 	renderLine("  c        - Open console (interactive shell, altscreen)", textStyle)
-	renderLine("  d        - Toggle console mode (exec ↔ debug)", textStyle)
 	renderLine("  o        - Open container port in browser", textStyle)
 	renderLine("  l        - View container logs", textStyle)
 	renderLine("  i        - Inspect (stats/image/mounts)", textStyle)
-	renderLine("  Enter    - Refresh container list", textStyle)
+	renderLine("  Enter    - Refresh list", textStyle)
 	renderLine("  ESC      - Return from detail views", textStyle)
+	b.WriteString("\n")
+	renderLine("Filtering:", headerStyle)
+	renderLine("  f        - Filter items (All/Running/In Use/etc.)", textStyle)
 	b.WriteString("\n")
 	renderLine("Other:", headerStyle)
 	renderLine("  F1       - Toggle help", textStyle)
@@ -2334,6 +2755,105 @@ func getStatusDot(status string) string {
 	default:
 		return grayStyle.Render("○")
 	}
+}
+
+// Filter helper functions
+
+// Filter containers based on selected filter
+func filterContainers(containers []Container, filter int) []Container {
+	switch filter {
+	case containerFilterRunning:
+		var filtered []Container
+		for _, c := range containers {
+			if c.Status == "RUNNING" {
+				filtered = append(filtered, c)
+			}
+		}
+		return filtered
+	default: // containerFilterAll
+		return containers
+	}
+}
+
+// Filter images based on selected filter
+func filterImages(images []Image, containers []Container, filter int) []Image {
+	switch filter {
+	case imageFilterInUse:
+		var filtered []Image
+		for _, img := range images {
+			if isImageInUse(img, containers) {
+				filtered = append(filtered, img)
+			}
+		}
+		return filtered
+	case imageFilterUnused:
+		var filtered []Image
+		for _, img := range images {
+			if !isImageInUse(img, containers) {
+				filtered = append(filtered, img)
+			}
+		}
+		return filtered
+	case imageFilterDangling:
+		var filtered []Image
+		for _, img := range images {
+			if img.Repository == "<none>" && img.Tag == "<none>" {
+				filtered = append(filtered, img)
+			}
+		}
+		return filtered
+	default: // imageFilterAll
+		return images
+	}
+}
+
+// Filter volumes based on selected filter
+func filterVolumes(volumes []Volume, containers []Container, client *client.Client) []Volume {
+	// For now, return all volumes since we need to implement volume usage detection
+	// TODO: Implement volume usage detection using container inspect
+	return volumes
+}
+
+// Filter networks based on selected filter
+func filterNetworks(networks []Network, containers []Container, client *client.Client) []Network {
+	// For now, return all networks since we need to implement network usage detection
+	// TODO: Implement network usage detection using container inspect
+	return networks
+}
+
+// Helper function to check if an image is in use by any container
+func isImageInUse(image Image, containers []Container) bool {
+	imageFullName := image.Repository + ":" + image.Tag
+
+	for _, container := range containers {
+		containerImage := container.Image
+
+		// Check exact match with full name
+		if containerImage == imageFullName {
+			return true
+		}
+
+		// Check if container image contains the repository:tag
+		if strings.Contains(containerImage, imageFullName) {
+			return true
+		}
+
+		// Check repository match (for images with implicit :latest tag)
+		if containerImage == image.Repository {
+			return true
+		}
+
+		// Check if container image ends with repository:tag (handles registry prefixes)
+		if strings.HasSuffix(containerImage, "/"+imageFullName) {
+			return true
+		}
+
+		// Check by image ID
+		if strings.HasPrefix(container.ID, image.ID) || strings.HasPrefix(image.ID, container.ID) {
+			return true
+		}
+	}
+	return false
 }
 
 // Helper function to truncate text with ellipsis if too long

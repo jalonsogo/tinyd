@@ -78,12 +78,12 @@ go run main.go
 ### Container Actions
 - `s` - Start/Stop selected container (toggles based on current state)
 - `r` - Restart selected container
-- `c` - Open console with toolbar (launches altscreen with info header)
-- `d` - Toggle console mode (docker exec ↔ docker debug)
+- `c` - Open console (launches altscreen with info header)
 - `o` - Open container's exposed port in browser (shows selector for multiple ports)
 - `l` - View container logs (last 100 lines)
 - `i` - Inspect container (stats, image, bind mounts)
-- `Enter` - Refresh container list / Select port (in port selector)
+- `f` - Filter containers/images/volumes/networks
+- `Enter` - Refresh list / Select port (in port selector)
 - `ESC` - Return from detail views (logs/inspect/port selector)
 
 ### Controls

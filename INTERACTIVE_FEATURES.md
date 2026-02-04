@@ -70,10 +70,6 @@ When a container has multiple exposed ports, a modal appears:
 - Exit shell (type `exit` or Ctrl+D) returns to TUI exactly as before
 - No scrollback pollution or disruption
 
-**Console Modes:**
-- **Docker Exec** (default) - Standard shell access
-- **Docker Debug** - Advanced debugging tools (toggle with `d`)
-
 **Usage:**
 ```
 1. Select a RUNNING container
@@ -87,7 +83,7 @@ When a container has multiple exposed ports, a modal appears:
 **Altscreen Toolbar:**
 When the console opens, a persistent toolbar displays:
 - Container name (highlighted in yellow)
-- Console mode (docker exec or docker debug)
+- Console mode (docker exec)
 - Container ID
 - Exit instructions (how to return to TUI)
 - Custom shell prompt with container name
@@ -96,15 +92,7 @@ The toolbar provides context at all times without interrupting your workflow.
 
 See `CONSOLE_FEATURE.md` for detailed documentation.
 
-### 5. Toggle Debug Mode (`d` key)
-
-**Switch Console Mode:**
-- Press `d` to toggle between `docker exec` and `docker debug`
-- Status message shows current mode
-- Action bar indicates active mode: `[C]onsole (exec)` or `[C]onsole (debug)`
-- Setting persists until changed
-
-### 6. Manual Refresh (`Enter` key)
+### 5. Manual Refresh (`Enter` key)
 
 - Press `Enter` to immediately refresh the container list
 - Fetches latest stats and status
@@ -118,7 +106,7 @@ The bottom of the screen shows:
 
 **Available Actions:**
 ```
-[S]top | [R]estart | [O]pen in browser
+[S]top | [R]estart | [C]onsole | [O]pen in browser | [L]ogs | [I]nspect | [F]ilter
 ```
 
 **Action in Progress:**
@@ -232,7 +220,11 @@ Quick reference for all interactive actions:
 Navigation:        Action Keys:
   ↑/k - Up           s - Start/Stop
   ↓/j - Down         r - Restart
-  1-4 - Tabs         o - Open browser
+  1-4 - Tabs         c - Console
+                     o - Open browser
+                     l - Logs
+                     i - Inspect
+                     f - Filter
                      ↵ - Refresh
 Controls:
   F1  - Help

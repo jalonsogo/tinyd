@@ -388,10 +388,6 @@ func (a ActionBarComponent) View() string {
 		Foreground(lipgloss.Color("#303030")).
 		Background(lipgloss.Color("#0a0a0a"))
 
-	actionStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#666666")).
-		Background(lipgloss.Color("#0a0a0a"))
-
 	statusStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#00FFFF")).
 		Background(lipgloss.Color("#0a0a0a"))
@@ -410,17 +406,10 @@ func (a ActionBarComponent) View() string {
 		if strings.HasPrefix(a.statusMessage, "ERROR:") {
 			style = errorStyle
 		}
-		msg := a.statusMessage
-		if len(msg) > a.width-2 {
-			msg = msg[:a.width-5] + "..."
-		}
-		b.WriteString(style.Render(msg))
+		b.WriteString(style.Render(a.statusMessage))
 	} else if a.actions != "" {
-		msg := a.actions
-		if len(msg) > a.width-2 {
-			msg = msg[:a.width-5] + "..."
-		}
-		b.WriteString(actionStyle.Render(msg))
+		// Actions string already contains ANSI codes from renderShortcut, render as-is
+		b.WriteString(a.actions)
 	}
 	b.WriteString("\n")
 
@@ -534,4 +523,18 @@ func (d DetailViewComponent) View() string {
 	}
 
 	return b.String()
+}
+
+// Strip ANSI escape codes for length calculation
+func stripAnsiCodes(str string) string {
+	result := str
+	for strings.Contains(result, "\x1b[") {
+		start := strings.Index(result, "\x1b[")
+		end := strings.Index(result[start:], "m")
+		if end == -1 {
+			break
+		}
+		result = result[:start] + result[start+end+1:]
+	}
+	return result
 }

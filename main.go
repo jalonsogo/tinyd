@@ -117,6 +117,17 @@ const (
 	networkFilterUnused
 )
 
+// Run modal field indices
+const (
+	runFieldContainerName = iota
+	runFieldPortHost
+	runFieldPortContainer
+	runFieldVolumeHost
+	runFieldVolumeContainer
+	runFieldEnvKey
+	runFieldEnvValue
+)
+
 // Model represents the application state
 type model struct {
 	activeTab        int
@@ -1220,8 +1231,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
-		// In modal views (stop confirm, port selector, filter, run image, delete confirm), only allow specific keys
-		if m.currentView == viewModeStopConfirm || m.currentView == viewModePortSelector || m.currentView == viewModeFilter || m.currentView == viewModeRunImage || m.currentView == viewModeDeleteConfirm {
+		// In modal views, handle keys differently
+		if m.currentView == viewModeRunImage {
+			// Run modal - allow all keys for text input and navigation
+			return m, m.handleRunModalInput(msg)
+		} else if m.currentView == viewModeStopConfirm || m.currentView == viewModePortSelector || m.currentView == viewModeFilter || m.currentView == viewModeDeleteConfirm {
 			key := msg.String()
 			// Allow quit, ESC, and Enter to pass through to main switch
 			// Allow up/down for port selector and filter modal
@@ -1447,8 +1461,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.selectedFilter = m.networkFilter
 				}
 			}
-		case "n":
-			// Run (ruN) image (Images tab only)
+		case "R":
+			// Run image (Images tab only)
 			if m.activeTab == 1 && m.currentView == viewModeList {
 				filteredImages := filterImages(m.images, m.containers, m.imageFilter)
 				if len(filteredImages) > 0 && m.selectedRow < len(filteredImages) {
@@ -1729,6 +1743,154 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, nil
+}
+
+// Handle input in the Run modal
+func (m model) handleRunModalInput(msg tea.KeyMsg) tea.Cmd {
+	key := msg.String()
+
+	switch key {
+	case "esc":
+		// Exit modal
+		m.currentView = viewModeList
+		m.selectedImage = nil
+		return nil
+
+	case "enter":
+		// Handle enter based on current field
+		switch m.runModalField {
+		case runFieldPortContainer:
+			// Add port mapping if both fields are filled
+			if m.runPortHost != "" && m.runPortContainer != "" {
+				m.runPorts = append(m.runPorts, PortMapping{
+					Host:      m.runPortHost,
+					Container: m.runPortContainer,
+				})
+				m.runPortHost = ""
+				m.runPortContainer = ""
+				m.runModalField = runFieldPortHost
+			} else {
+				// Move to next section
+				m.runModalField = runFieldVolumeHost
+			}
+		case runFieldVolumeContainer:
+			// Add volume mapping if both fields are filled
+			if m.runVolumeHost != "" && m.runVolumeContainer != "" {
+				m.runVolumes = append(m.runVolumes, VolumeMapping{
+					Host:      m.runVolumeHost,
+					Container: m.runVolumeContainer,
+					IsNamed:   false,
+				})
+				m.runVolumeHost = ""
+				m.runVolumeContainer = ""
+				m.runModalField = runFieldVolumeHost
+			} else {
+				// Move to next section
+				m.runModalField = runFieldEnvKey
+			}
+		case runFieldEnvValue:
+			// Add environment variable if both fields are filled
+			if m.runEnvKey != "" && m.runEnvValue != "" {
+				m.runEnvVars = append(m.runEnvVars, EnvVar{
+					Key:   m.runEnvKey,
+					Value: m.runEnvValue,
+				})
+				m.runEnvKey = ""
+				m.runEnvValue = ""
+				m.runModalField = runFieldEnvKey
+			} else {
+				// Submit form if no env var being entered
+				if m.selectedImage != nil {
+					m.currentView = viewModeList
+					m.actionInProgress = true
+					m.statusMessage = "Starting container..."
+					return runContainer(m.dockerClient, m.selectedImage, m.runContainerName, m.runPorts, m.runVolumes, m.runEnvVars)
+				}
+			}
+		default:
+			// Move to next field
+			m.runModalField++
+			if m.runModalField > runFieldEnvValue {
+				// Submit form
+				if m.selectedImage != nil {
+					m.currentView = viewModeList
+					m.actionInProgress = true
+					m.statusMessage = "Starting container..."
+					return runContainer(m.dockerClient, m.selectedImage, m.runContainerName, m.runPorts, m.runVolumes, m.runEnvVars)
+				}
+			}
+		}
+
+	case "tab":
+		// Move to next field
+		m.runModalField++
+		if m.runModalField > runFieldEnvValue {
+			m.runModalField = runFieldContainerName
+		}
+
+	case "shift+tab":
+		// Move to previous field
+		m.runModalField--
+		if m.runModalField < 0 {
+			m.runModalField = runFieldEnvValue
+		}
+
+	case "backspace":
+		// Delete character from current field
+		switch m.runModalField {
+		case runFieldContainerName:
+			if len(m.runContainerName) > 0 {
+				m.runContainerName = m.runContainerName[:len(m.runContainerName)-1]
+			}
+		case runFieldPortHost:
+			if len(m.runPortHost) > 0 {
+				m.runPortHost = m.runPortHost[:len(m.runPortHost)-1]
+			}
+		case runFieldPortContainer:
+			if len(m.runPortContainer) > 0 {
+				m.runPortContainer = m.runPortContainer[:len(m.runPortContainer)-1]
+			}
+		case runFieldVolumeHost:
+			if len(m.runVolumeHost) > 0 {
+				m.runVolumeHost = m.runVolumeHost[:len(m.runVolumeHost)-1]
+			}
+		case runFieldVolumeContainer:
+			if len(m.runVolumeContainer) > 0 {
+				m.runVolumeContainer = m.runVolumeContainer[:len(m.runVolumeContainer)-1]
+			}
+		case runFieldEnvKey:
+			if len(m.runEnvKey) > 0 {
+				m.runEnvKey = m.runEnvKey[:len(m.runEnvKey)-1]
+			}
+		case runFieldEnvValue:
+			if len(m.runEnvValue) > 0 {
+				m.runEnvValue = m.runEnvValue[:len(m.runEnvValue)-1]
+			}
+		}
+
+	default:
+		// Add character to current field (only if it's a single character)
+		if len(key) == 1 {
+			switch m.runModalField {
+			case runFieldContainerName:
+				m.runContainerName += key
+			case runFieldPortHost:
+				m.runPortHost += key
+			case runFieldPortContainer:
+				m.runPortContainer += key
+			case runFieldVolumeHost:
+				m.runVolumeHost += key
+			case runFieldVolumeContainer:
+				m.runVolumeContainer += key
+			case runFieldEnvKey:
+				m.runEnvKey += key
+			case runFieldEnvValue:
+				m.runEnvValue += key
+			}
+		}
+	}
+
+	return nil
 }
 
 // Get max row count for current tab (accounting for filters)
@@ -2267,7 +2429,7 @@ func (m model) renderImages() string {
 	// Action bar component with responsive width
 	m.actionBar = m.actionBar.SetStatusMessage(m.statusMessage)
 	if m.statusMessage == "" && len(filteredImages) > 0 {
-		actions := " " + "ru" + renderShortcut("N") + " | " + renderShortcut("Delete") + " | " + renderShortcut("Pull") + " | " + renderShortcut("Filter")
+		actions := " " + renderShortcut("Run") + " | " + renderShortcut("Delete") + " | " + renderShortcut("Pull") + " | " + renderShortcut("Filter")
 		m.actionBar = m.actionBar.SetActions(actions)
 	} else {
 		m.actionBar = m.actionBar.SetActions("")
@@ -3167,11 +3329,13 @@ func (m model) renderRunImageModal() string {
 	textColor := lipgloss.Color("#CCCCCC")
 	labelColor := lipgloss.Color("#999999")
 	inputColor := lipgloss.Color("#FFFFFF")
+	activeColor := lipgloss.Color("#00FF00") // Green for active field
 
 	borderStyle := lipgloss.NewStyle().Foreground(borderColor)
 	textStyle := lipgloss.NewStyle().Foreground(textColor)
 	labelStyle := lipgloss.NewStyle().Foreground(labelColor)
 	inputStyle := lipgloss.NewStyle().Foreground(inputColor)
+	activeStyle := lipgloss.NewStyle().Foreground(activeColor).Bold(true)
 
 	// Calculate inner width
 	innerWidth := modalWidth - 4
@@ -3192,12 +3356,20 @@ func (m model) renderRunImageModal() string {
 
 	// Container name
 	modalContent.WriteString(borderStyle.Render("│") + strings.Repeat(" ", innerWidth+2) + borderStyle.Render("│") + "\n")
-	nameLabel := " Container name: " + m.runContainerName
+	nameValue := m.runContainerName
+	if m.runModalField == runFieldContainerName {
+		nameValue += "█" // Cursor
+	}
+	nameLabel := " Container name: " + nameValue
 	if len(nameLabel) > innerWidth {
 		nameLabel = nameLabel[:innerWidth-3] + "..."
 	}
 	namePadding := strings.Repeat(" ", innerWidth+2-len(nameLabel))
-	modalContent.WriteString(borderStyle.Render("│") + labelStyle.Render(nameLabel) + namePadding + borderStyle.Render("│") + "\n")
+	fieldStyle := labelStyle
+	if m.runModalField == runFieldContainerName {
+		fieldStyle = activeStyle
+	}
+	modalContent.WriteString(borderStyle.Render("│") + fieldStyle.Render(nameLabel) + namePadding + borderStyle.Render("│") + "\n")
 
 	// Ports section
 	modalContent.WriteString(borderStyle.Render("│") + strings.Repeat(" ", innerWidth+2) + borderStyle.Render("│") + "\n")
@@ -3215,13 +3387,29 @@ func (m model) renderRunImageModal() string {
 	}
 
 	// Add port inputs
-	portHostLabel := "   Host: " + m.runPortHost
+	portHostValue := m.runPortHost
+	if m.runModalField == runFieldPortHost {
+		portHostValue += "█"
+	}
+	portHostLabel := "   Host: " + portHostValue
 	portHostPadding := strings.Repeat(" ", innerWidth+2-len(portHostLabel))
-	modalContent.WriteString(borderStyle.Render("│") + labelStyle.Render(portHostLabel) + portHostPadding + borderStyle.Render("│") + "\n")
+	portHostStyle := labelStyle
+	if m.runModalField == runFieldPortHost {
+		portHostStyle = activeStyle
+	}
+	modalContent.WriteString(borderStyle.Render("│") + portHostStyle.Render(portHostLabel) + portHostPadding + borderStyle.Render("│") + "\n")
 
-	portContainerLabel := "   Container: " + m.runPortContainer
+	portContainerValue := m.runPortContainer
+	if m.runModalField == runFieldPortContainer {
+		portContainerValue += "█"
+	}
+	portContainerLabel := "   Container: " + portContainerValue
 	portContainerPadding := strings.Repeat(" ", innerWidth+2-len(portContainerLabel))
-	modalContent.WriteString(borderStyle.Render("│") + labelStyle.Render(portContainerLabel) + portContainerPadding + borderStyle.Render("│") + "\n")
+	portContainerStyle := labelStyle
+	if m.runModalField == runFieldPortContainer {
+		portContainerStyle = activeStyle
+	}
+	modalContent.WriteString(borderStyle.Render("│") + portContainerStyle.Render(portContainerLabel) + portContainerPadding + borderStyle.Render("│") + "\n")
 
 	// Volumes section
 	modalContent.WriteString(borderStyle.Render("│") + strings.Repeat(" ", innerWidth+2) + borderStyle.Render("│") + "\n")
@@ -3247,19 +3435,35 @@ func (m model) renderRunImageModal() string {
 	}
 
 	// Add volume inputs
-	volHostLabel := "   Host path: " + m.runVolumeHost
+	volHostValue := m.runVolumeHost
+	if m.runModalField == runFieldVolumeHost {
+		volHostValue += "█"
+	}
+	volHostLabel := "   Host path: " + volHostValue
 	if len(volHostLabel) > innerWidth {
 		volHostLabel = volHostLabel[:innerWidth-3] + "..."
 	}
 	volHostPadding := strings.Repeat(" ", innerWidth+2-len(volHostLabel))
-	modalContent.WriteString(borderStyle.Render("│") + labelStyle.Render(volHostLabel) + volHostPadding + borderStyle.Render("│") + "\n")
+	volHostStyle := labelStyle
+	if m.runModalField == runFieldVolumeHost {
+		volHostStyle = activeStyle
+	}
+	modalContent.WriteString(borderStyle.Render("│") + volHostStyle.Render(volHostLabel) + volHostPadding + borderStyle.Render("│") + "\n")
 
-	volContainerLabel := "   Container path: " + m.runVolumeContainer
+	volContainerValue := m.runVolumeContainer
+	if m.runModalField == runFieldVolumeContainer {
+		volContainerValue += "█"
+	}
+	volContainerLabel := "   Container path: " + volContainerValue
 	if len(volContainerLabel) > innerWidth {
 		volContainerLabel = volContainerLabel[:innerWidth-3] + "..."
 	}
 	volContainerPadding := strings.Repeat(" ", innerWidth+2-len(volContainerLabel))
-	modalContent.WriteString(borderStyle.Render("│") + labelStyle.Render(volContainerLabel) + volContainerPadding + borderStyle.Render("│") + "\n")
+	volContainerStyle := labelStyle
+	if m.runModalField == runFieldVolumeContainer {
+		volContainerStyle = activeStyle
+	}
+	modalContent.WriteString(borderStyle.Render("│") + volContainerStyle.Render(volContainerLabel) + volContainerPadding + borderStyle.Render("│") + "\n")
 
 	// Environment variables section
 	modalContent.WriteString(borderStyle.Render("│") + strings.Repeat(" ", innerWidth+2) + borderStyle.Render("│") + "\n")
@@ -3280,16 +3484,32 @@ func (m model) renderRunImageModal() string {
 	}
 
 	// Add env var inputs
-	envKeyLabel := "   Key: " + m.runEnvKey
+	envKeyValue := m.runEnvKey
+	if m.runModalField == runFieldEnvKey {
+		envKeyValue += "█"
+	}
+	envKeyLabel := "   Key: " + envKeyValue
 	envKeyPadding := strings.Repeat(" ", innerWidth+2-len(envKeyLabel))
-	modalContent.WriteString(borderStyle.Render("│") + labelStyle.Render(envKeyLabel) + envKeyPadding + borderStyle.Render("│") + "\n")
+	envKeyStyle := labelStyle
+	if m.runModalField == runFieldEnvKey {
+		envKeyStyle = activeStyle
+	}
+	modalContent.WriteString(borderStyle.Render("│") + envKeyStyle.Render(envKeyLabel) + envKeyPadding + borderStyle.Render("│") + "\n")
 
-	envValueLabel := "   Value: " + m.runEnvValue
+	envValueValue := m.runEnvValue
+	if m.runModalField == runFieldEnvValue {
+		envValueValue += "█"
+	}
+	envValueLabel := "   Value: " + envValueValue
 	if len(envValueLabel) > innerWidth {
 		envValueLabel = envValueLabel[:innerWidth-3] + "..."
 	}
 	envValuePadding := strings.Repeat(" ", innerWidth+2-len(envValueLabel))
-	modalContent.WriteString(borderStyle.Render("│") + labelStyle.Render(envValueLabel) + envValuePadding + borderStyle.Render("│") + "\n")
+	envValueStyle := labelStyle
+	if m.runModalField == runFieldEnvValue {
+		envValueStyle = activeStyle
+	}
+	modalContent.WriteString(borderStyle.Render("│") + envValueStyle.Render(envValueLabel) + envValuePadding + borderStyle.Render("│") + "\n")
 
 	// Empty line
 	modalContent.WriteString(borderStyle.Render("│") + strings.Repeat(" ", innerWidth+2) + borderStyle.Render("│") + "\n")
@@ -3298,7 +3518,7 @@ func (m model) renderRunImageModal() string {
 	modalContent.WriteString(borderStyle.Render("├" + strings.Repeat("─", innerWidth+2) + "┤") + "\n")
 
 	// Keyboard shortcuts
-	footerText := " " + renderShortcut("Enter") + " run, " + renderShortcut("Esc") + " cancel"
+	footerText := " " + renderShortcut("Tab") + " next, " + renderShortcut("Enter") + " add/run, " + renderShortcut("Esc") + " cancel"
 	footerPadding := strings.Repeat(" ", innerWidth+2-len(stripAnsiCodes(footerText)))
 	modalContent.WriteString(borderStyle.Render("│") + footerText + footerPadding + borderStyle.Render("│") + "\n")
 

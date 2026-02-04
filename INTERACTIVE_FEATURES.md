@@ -29,16 +29,82 @@ The Docker TUI now supports full interactive container management directly from 
 ### 3. Open in Browser (`o` key)
 
 **For Containers with Exposed Ports:**
-- Press `o` to open the first exposed port in your default browser
+- Press `o` to open exposed ports in your default browser
+- **Single port**: Opens directly in browser
+- **Multiple ports**: Shows a selection modal
+- **Background opening**: Browser opens without stealing focus from TUI
 - Automatically constructs `http://localhost:PORT`
-- Works on macOS (`open`), Linux (`xdg-open`), and Windows (`start`)
+- Works on macOS (`open -g`), Linux (`xdg-open`), and Windows (`start /B`)
 - Perfect for web applications and APIs
 
-**Example:**
-- Container exposes port `3000`
-- Press `o` opens `http://localhost:3000` in your browser
+**Port Selection Modal:**
+When a container has multiple exposed ports, a modal appears:
+```
+┌─────────────────────────────────────────────────────────┐
+│ Select Port - nginx-proxy                               │
+├─────────────────────────────────────────────────────────┤
+│                                                          │
+│ Select which port to open in browser:                   │
+│                                                          │
+│  >  http://localhost:80                                 │
+│     http://localhost:443                                │
+│     http://localhost:8080                               │
+│                                                          │
+│ ↑/↓ Navigate  |  ENTER Open  |  ESC Cancel             │
+└─────────────────────────────────────────────────────────┘
+```
 
-### 4. Manual Refresh (`Enter` key)
+**Example:**
+- Container exposes ports `80,443,8080`
+- Press `o` → Port selector appears
+- Use `↑/↓` to navigate
+- Press `ENTER` to open selected port
+- Press `ESC` to cancel
+
+### 4. Console Access (`c` key) - **NEW with Altscreen!**
+
+**Interactive Shell in Containers:**
+- Press `c` to open an interactive shell inside a running container
+- Uses **altscreen** technology for seamless terminal switching
+- Terminal temporarily switches to full-screen shell
+- Exit shell (type `exit` or Ctrl+D) returns to TUI exactly as before
+- No scrollback pollution or disruption
+
+**Console Modes:**
+- **Docker Exec** (default) - Standard shell access
+- **Docker Debug** - Advanced debugging tools (toggle with `d`)
+
+**Usage:**
+```
+1. Select a RUNNING container
+2. Press 'c' to launch altscreen console
+3. [Terminal switches to altscreen with toolbar at top]
+4. Toolbar shows: container name, mode, ID, exit instructions
+5. Run commands in container shell (custom prompt shows container name)
+6. Type 'exit' or Ctrl+D to return to TUI
+```
+
+**Altscreen Toolbar:**
+When the console opens, a persistent toolbar displays:
+- Container name (highlighted in yellow)
+- Console mode (docker exec or docker debug)
+- Container ID
+- Exit instructions (how to return to TUI)
+- Custom shell prompt with container name
+
+The toolbar provides context at all times without interrupting your workflow.
+
+See `CONSOLE_FEATURE.md` for detailed documentation.
+
+### 5. Toggle Debug Mode (`d` key)
+
+**Switch Console Mode:**
+- Press `d` to toggle between `docker exec` and `docker debug`
+- Status message shows current mode
+- Action bar indicates active mode: `[C]onsole (exec)` or `[C]onsole (debug)`
+- Setting persists until changed
+
+### 6. Manual Refresh (`Enter` key)
 
 - Press `Enter` to immediately refresh the container list
 - Fetches latest stats and status

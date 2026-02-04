@@ -78,8 +78,13 @@ go run main.go
 ### Container Actions
 - `s` - Start/Stop selected container (toggles based on current state)
 - `r` - Restart selected container
-- `o` - Open container's exposed port in your default browser
-- `Enter` - Refresh container list
+- `c` - Open console with toolbar (launches altscreen with info header)
+- `d` - Toggle console mode (docker exec ↔ docker debug)
+- `o` - Open container's exposed port in browser (shows selector for multiple ports)
+- `l` - View container logs (last 100 lines)
+- `i` - Inspect container (stats, image, bind mounts)
+- `Enter` - Refresh container list / Select port (in port selector)
+- `ESC` - Return from detail views (logs/inspect/port selector)
 
 ### Controls
 - `F1` - Toggle help screen
@@ -92,12 +97,13 @@ go run main.go
 ### 1. Containers Tab (Default)
 Displays all Docker containers with live data:
 - Container ID and name
-- Status (RUNNING/STOPPED/PAUSED) - color-coded
+- Status (RUNNING/STOPPED/PAUSED/ERROR) - color-coded
 - CPU usage percentage (for running containers)
 - Memory usage in human-readable format
 - Docker image name
 - Exposed ports (public and private)
 - **Interactive actions**: Start/Stop, Restart, Open in browser
+- **Smart sorting**: Containers ordered by status (Running → Paused → Error → Stopped)
 
 ### 2. Images Tab
 Lists all Docker images on the system:

@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"runtime"
+	"sort"
 	"strings"
 	"time"
 
@@ -65,6 +67,18 @@ type errMsg error
 type tickMsg time.Time
 type actionSuccessMsg string
 type actionErrorMsg string
+type logsMsg string
+type inspectMsg string
+
+// View modes
+type viewMode int
+
+const (
+	viewModeList viewMode = iota
+	viewModeLogs
+	viewModeInspect
+	viewModePortSelector
+)
 
 // Model represents the application state
 type model struct {
@@ -84,6 +98,25 @@ type model struct {
 	loading          bool
 	statusMessage    string
 	actionInProgress bool
+	useDockerDebug   bool // Use 'docker debug' instead of 'docker exec'
+
+	// Detail views
+	currentView       viewMode
+	logsContent       string
+	logsScrollOffset  int
+	inspectContent    string
+	inspectMode       int // 0=stats, 1=image, 2=mounts
+	selectedContainer *Container
+
+	// Port selector
+	availablePorts   []string
+	selectedPortIdx  int
+
+	// Components
+	header     HeaderComponent
+	tabs       TabsComponent
+	actionBar  ActionBarComponent
+	detailView DetailViewComponent
 }
 
 // Color palette matching the Pencil design
@@ -132,6 +165,14 @@ func initialModel() model {
 	// Create Docker client
 	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 
+	// Initialize components
+	tabs := []TabItem{
+		{Name: "Containers", Shortcut: "^D"},
+		{Name: "Images", Shortcut: "^I"},
+		{Name: "Volumes", Shortcut: "^V"},
+		{Name: "Networks", Shortcut: "^N"},
+	}
+
 	return model{
 		activeTab:      0,
 		selectedRow:    0,
@@ -146,6 +187,12 @@ func initialModel() model {
 		dockerClient:   cli,
 		err:            err,
 		loading:        true,
+
+		// Initialize components
+		header:     NewHeaderComponent("Docker TUI v2.0.1", "[F1] Help [Q]uit"),
+		tabs:       NewTabsComponent(tabs, 0),
+		actionBar:  NewActionBarComponent(),
+		detailView: NewDetailViewComponent("", 15),
 	}
 }
 
@@ -189,6 +236,11 @@ func fetchContainers(cli *client.Client) tea.Cmd {
 				status = "RUNNING"
 			} else if string(c.State) == "paused" {
 				status = "PAUSED"
+			} else if string(c.State) == "restarting" || string(c.State) == "dead" || string(c.State) == "exited" {
+				// Check exit code for errors
+				if c.Status != "" && strings.Contains(strings.ToLower(c.Status), "error") {
+					status = "ERROR"
+				}
 			}
 
 			// Format image (shorten if too long)
@@ -268,7 +320,28 @@ func fetchContainers(cli *client.Client) tea.Cmd {
 			})
 		}
 
+		// Sort containers by status priority: RUNNING > PAUSED > ERROR > STOPPED
+		sort.SliceStable(displayContainers, func(i, j int) bool {
+			return getStatusPriority(displayContainers[i].Status) < getStatusPriority(displayContainers[j].Status)
+		})
+
 		return containerListMsg(displayContainers)
+	}
+}
+
+// Get status priority for sorting (lower number = higher priority)
+func getStatusPriority(status string) int {
+	switch status {
+	case "RUNNING":
+		return 1
+	case "PAUSED":
+		return 2
+	case "ERROR":
+		return 3
+	case "STOPPED":
+		return 4
+	default:
+		return 5
 	}
 }
 
@@ -566,11 +639,14 @@ func openBrowser(port string) tea.Cmd {
 		var cmd *exec.Cmd
 		switch runtime.GOOS {
 		case "darwin":
-			cmd = exec.Command("open", url)
+			// -g flag opens in background without stealing focus
+			cmd = exec.Command("open", "-g", url)
 		case "linux":
-			cmd = exec.Command("xdg-open", url)
+			// Use nohup to prevent terminal blocking and run in background
+			cmd = exec.Command("sh", "-c", fmt.Sprintf("nohup xdg-open %s >/dev/null 2>&1 &", url))
 		case "windows":
-			cmd = exec.Command("cmd", "/c", "start", url)
+			// /B flag prevents creating new window and opening in background
+			cmd = exec.Command("cmd", "/c", "start", "/B", url)
 		default:
 			return actionErrorMsg("Unsupported operating system")
 		}
@@ -579,7 +655,237 @@ func openBrowser(port string) tea.Cmd {
 			return actionErrorMsg(fmt.Sprintf("Failed to open browser: %v", err))
 		}
 
-		return actionSuccessMsg(fmt.Sprintf("Opening %s in browser", url))
+		return actionSuccessMsg(fmt.Sprintf("Opening %s in browser (background)", url))
+	}
+}
+
+// Parse ports string into individual port numbers
+func parsePorts(portsStr string) []string {
+	if portsStr == "" || portsStr == "--" {
+		return []string{}
+	}
+
+	// Split by comma and clean up
+	ports := strings.Split(portsStr, ",")
+	var cleaned []string
+	for _, p := range ports {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			cleaned = append(cleaned, p)
+		}
+	}
+	return cleaned
+}
+
+// Open browser with specific port
+func openBrowserPort(port string) tea.Cmd {
+	return func() tea.Msg {
+		url := fmt.Sprintf("http://localhost:%s", port)
+
+		var cmd *exec.Cmd
+		switch runtime.GOOS {
+		case "darwin":
+			// -g flag opens in background without stealing focus
+			cmd = exec.Command("open", "-g", url)
+		case "linux":
+			// Use nohup to prevent terminal blocking and run in background
+			cmd = exec.Command("sh", "-c", fmt.Sprintf("nohup xdg-open %s >/dev/null 2>&1 &", url))
+		case "windows":
+			// /B flag prevents creating new window and opening in background
+			cmd = exec.Command("cmd", "/c", "start", "/B", url)
+		default:
+			return actionErrorMsg("Unsupported operating system")
+		}
+
+		if err := cmd.Start(); err != nil {
+			return actionErrorMsg(fmt.Sprintf("Failed to open browser: %v", err))
+		}
+
+		return actionSuccessMsg(fmt.Sprintf("Opening %s in browser (background)", url))
+	}
+}
+
+// Open console in container
+func openConsole(containerID, containerName string, useDebug bool) tea.Cmd {
+	var cmd *exec.Cmd
+
+	if useDebug {
+		// Use docker debug directly
+		cmd = exec.Command("docker", "debug", containerID)
+	} else {
+		// Try different shells with docker exec
+		shells := []string{"/bin/bash", "/bin/sh", "/bin/ash"}
+		var selectedShell string
+
+		for _, shell := range shells {
+			testCmd := exec.Command("docker", "exec", containerID, "test", "-f", shell)
+			if testCmd.Run() == nil {
+				selectedShell = shell
+				break
+			}
+		}
+
+		// Fallback to /bin/sh if no shell found
+		if selectedShell == "" {
+			selectedShell = "/bin/sh"
+		}
+
+		// Write init script to display toolbar
+		mode := "docker exec"
+		if useDebug {
+			mode = "docker debug"
+		}
+
+		// Create script that shows toolbar and starts shell
+		initScript := createToolbarScript(containerName, mode, containerID, selectedShell)
+
+		cmd = exec.Command("docker", "exec", "-it", containerID, selectedShell, "-c", initScript)
+	}
+
+	// Use tea.ExecProcess for altscreen support
+	return tea.ExecProcess(cmd, func(err error) tea.Msg {
+		if err != nil {
+			return actionErrorMsg(fmt.Sprintf("Console error: %v", err))
+		}
+		return actionSuccessMsg(fmt.Sprintf("Exited console for %s", containerName))
+	})
+}
+
+func createToolbarScript(containerName, mode, containerID, shell string) string {
+	// Gradient toolbar from #1D85E1 to #0F4FA9 (light to dark blue)
+	modeText := "Exec"
+	if mode == "docker debug" {
+		modeText = "Debug"
+	}
+
+	// Build the toolbar text
+	containerInfo := fmt.Sprintf("%s (%s)", containerName, containerID)
+	modeInfo := fmt.Sprintf("Mode: %s", modeText)
+	exitInfo := "Exit: type 'exit' or Ctrl+D"
+
+	// Create shell script that generates gradient background
+	return fmt.Sprintf(`
+# Get terminal width
+WIDTH=$(tput cols)
+
+# Toolbar text
+TEXT="  %s                    %s              %s     "
+
+# RGB gradient colors: #1D85E1 to #0F4FA9
+# Start: rgb(29, 133, 225)
+# End: rgb(15, 79, 169)
+
+# Calculate text length
+TEXT_LEN=${#TEXT}
+
+# Generate gradient toolbar
+for i in $(seq 0 $((WIDTH - 1))); do
+    # Calculate gradient position (0.0 to 1.0)
+    if [ $WIDTH -gt 1 ]; then
+        # Linear interpolation
+        R=$((29 + (15 - 29) * i / (WIDTH - 1)))
+        G=$((133 + (79 - 133) * i / (WIDTH - 1)))
+        B=$((225 + (169 - 225) * i / (WIDTH - 1)))
+    else
+        R=29; G=133; B=225
+    fi
+
+    # Get character at position (or space if beyond text)
+    if [ $i -lt $TEXT_LEN ]; then
+        CHAR=$(printf "%%s" "$TEXT" | cut -c$((i + 1)))
+        [ -z "$CHAR" ] && CHAR=" "
+    else
+        CHAR=" "
+    fi
+
+    # Print character with gradient background and white foreground
+    printf '\033[48;2;%%d;%%d;%%dm\033[97m%%s\033[0m' $R $G $B "$CHAR"
+done
+printf '\n'
+
+export PS1='\[\033[1;36m\][%s]\[\033[0m\] \[\033[1;32m\]\w\[\033[0m\] $ '
+exec %s
+`, containerInfo, modeInfo, exitInfo, containerName, shell)
+}
+
+// Get container logs
+func getContainerLogs(cli *client.Client, containerID string) tea.Cmd {
+	return func() tea.Msg {
+		if cli == nil {
+			return errMsg(fmt.Errorf("docker client not initialized"))
+		}
+
+		ctx := context.Background()
+		options := client.ContainerLogsOptions{
+			ShowStdout: true,
+			ShowStderr: true,
+			Tail:       "100", // Last 100 lines
+		}
+
+		logs, err := cli.ContainerLogs(ctx, containerID, options)
+		if err != nil {
+			return actionErrorMsg(fmt.Sprintf("Failed to get logs: %v", err))
+		}
+		defer logs.Close()
+
+		logBytes, err := io.ReadAll(logs)
+		if err != nil {
+			return actionErrorMsg(fmt.Sprintf("Failed to read logs: %v", err))
+		}
+
+		return logsMsg(string(logBytes))
+	}
+}
+
+// Get container inspect info
+func inspectContainer(cli *client.Client, containerID string) tea.Cmd {
+	return func() tea.Msg {
+		if cli == nil {
+			return errMsg(fmt.Errorf("docker client not initialized"))
+		}
+
+		ctx := context.Background()
+		inspectResult, err := cli.ContainerInspect(ctx, containerID, client.ContainerInspectOptions{})
+		if err != nil {
+			return actionErrorMsg(fmt.Sprintf("Failed to inspect: %v", err))
+		}
+
+		inspectData := inspectResult.Container
+
+		// Format inspect data
+		var b strings.Builder
+
+		// Stats section
+		b.WriteString("=== STATS ===\n")
+		b.WriteString(fmt.Sprintf("ID: %s\n", inspectData.ID[:12]))
+		b.WriteString(fmt.Sprintf("Name: %s\n", inspectData.Name))
+		if inspectData.State != nil {
+			b.WriteString(fmt.Sprintf("Status: %s\n", inspectData.State.Status))
+			b.WriteString(fmt.Sprintf("Running: %t\n", inspectData.State.Running))
+			if inspectData.State.Running {
+				b.WriteString(fmt.Sprintf("Started: %s\n", inspectData.State.StartedAt))
+			}
+		}
+		b.WriteString(fmt.Sprintf("Created: %s\n", inspectData.Created))
+
+		// Image section
+		b.WriteString("\n=== IMAGE ===\n")
+		b.WriteString(fmt.Sprintf("Image: %s\n", inspectData.Image))
+
+		// Mounts section
+		b.WriteString("\n=== BIND MOUNTS ===\n")
+		if len(inspectData.Mounts) == 0 {
+			b.WriteString("No mounts\n")
+		} else {
+			for _, mount := range inspectData.Mounts {
+				b.WriteString(fmt.Sprintf("Type: %s\n", string(mount.Type)))
+				b.WriteString(fmt.Sprintf("Source: %s\n", mount.Source))
+				b.WriteString(fmt.Sprintf("Destination: %s\n", mount.Destination))
+				b.WriteString(fmt.Sprintf("RW: %t\n\n", mount.RW))
+			}
+		}
+
+		return inspectMsg(b.String())
 	}
 }
 
@@ -598,24 +904,40 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, tea.Quit
 		case "up", "k":
-			if m.selectedRow > 0 {
-				m.selectedRow--
-				m.statusMessage = "" // Clear status when navigating
+			// Port selector navigation
+			if m.currentView == viewModePortSelector {
+				if m.selectedPortIdx > 0 {
+					m.selectedPortIdx--
+				}
+			} else {
+				// Normal list navigation
+				if m.selectedRow > 0 {
+					m.selectedRow--
+					m.statusMessage = "" // Clear status when navigating
 
-				// Scroll up if needed
-				if m.selectedRow < m.scrollOffset {
-					m.scrollOffset = m.selectedRow
+					// Scroll up if needed
+					if m.selectedRow < m.scrollOffset {
+						m.scrollOffset = m.selectedRow
+					}
 				}
 			}
 		case "down", "j":
-			maxRow := m.getMaxRow()
-			if m.selectedRow < maxRow-1 {
-				m.selectedRow++
-				m.statusMessage = "" // Clear status when navigating
+			// Port selector navigation
+			if m.currentView == viewModePortSelector {
+				if m.selectedPortIdx < len(m.availablePorts)-1 {
+					m.selectedPortIdx++
+				}
+			} else {
+				// Normal list navigation
+				maxRow := m.getMaxRow()
+				if m.selectedRow < maxRow-1 {
+					m.selectedRow++
+					m.statusMessage = "" // Clear status when navigating
 
-				// Scroll down if needed
-				if m.selectedRow >= m.scrollOffset+m.viewportHeight {
-					m.scrollOffset = m.selectedRow - m.viewportHeight + 1
+					// Scroll down if needed
+					if m.selectedRow >= m.scrollOffset+m.viewportHeight {
+						m.scrollOffset = m.selectedRow - m.viewportHeight + 1
+					}
 				}
 			}
 		case "1", "ctrl+d":
@@ -646,7 +968,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.scrollOffset = 0
 				m.statusMessage = ""
 			}
-		case "right", "l":
+		case "right":
 			// Navigate to next tab
 			if m.activeTab < 3 {
 				m.activeTab++
@@ -682,9 +1004,78 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Open browser only works on containers tab
 			if m.activeTab == 0 && len(m.containers) > 0 && m.selectedRow < len(m.containers) {
 				selectedContainer := m.containers[m.selectedRow]
-				return m, openBrowser(selectedContainer.Ports)
+
+				// Parse ports
+				ports := parsePorts(selectedContainer.Ports)
+
+				if len(ports) == 0 {
+					m.statusMessage = "ERROR: No ports exposed"
+				} else if len(ports) == 1 {
+					// Single port - open directly
+					return m, openBrowser(selectedContainer.Ports)
+				} else {
+					// Multiple ports - show selector
+					m.availablePorts = ports
+					m.selectedPortIdx = 0
+					m.currentView = viewModePortSelector
+					m.selectedContainer = &selectedContainer
+				}
+			}
+		case "c":
+			// Open console with toolbar (uses altscreen)
+			if m.activeTab == 0 && len(m.containers) > 0 && m.selectedRow < len(m.containers) {
+				selectedContainer := m.containers[m.selectedRow]
+				if selectedContainer.Status == "RUNNING" {
+					return m, openConsole(selectedContainer.ID, selectedContainer.Name, m.useDockerDebug)
+				} else {
+					m.statusMessage = "ERROR: Container must be running"
+				}
+			}
+		case "d":
+			// Toggle docker debug mode
+			if m.activeTab == 0 {
+				m.useDockerDebug = !m.useDockerDebug
+				if m.useDockerDebug {
+					m.statusMessage = "Console mode: docker debug (enabled)"
+				} else {
+					m.statusMessage = "Console mode: docker exec (default)"
+				}
+			}
+		case "l":
+			// View logs
+			if m.activeTab == 0 && len(m.containers) > 0 && m.selectedRow < len(m.containers) {
+				selectedContainer := m.containers[m.selectedRow]
+				m.selectedContainer = &selectedContainer
+				m.currentView = viewModeLogs
+				m.logsScrollOffset = 0
+				return m, getContainerLogs(m.dockerClient, selectedContainer.ID)
+			}
+		case "i":
+			// Inspect container
+			if m.activeTab == 0 && len(m.containers) > 0 && m.selectedRow < len(m.containers) {
+				selectedContainer := m.containers[m.selectedRow]
+				m.selectedContainer = &selectedContainer
+				m.currentView = viewModeInspect
+				m.inspectMode = 0
+				return m, inspectContainer(m.dockerClient, selectedContainer.ID)
+			}
+		case "esc":
+			// Return to list view
+			if m.currentView != viewModeList {
+				m.currentView = viewModeList
+				m.selectedContainer = nil
+				m.logsContent = ""
+				m.inspectContent = ""
+				m.availablePorts = nil
 			}
 		case "enter":
+			// In port selector, open selected port
+			if m.currentView == viewModePortSelector && len(m.availablePorts) > 0 {
+				selectedPort := m.availablePorts[m.selectedPortIdx]
+				m.currentView = viewModeList
+				m.availablePorts = nil
+				return m, openBrowserPort(selectedPort)
+			}
 			// Refresh current tab
 			m.statusMessage = "Refreshing..."
 			switch m.activeTab {
@@ -702,6 +1093,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		// Update components with new width
+		m.header = m.header.WithWidth(m.width)
+		m.tabs = m.tabs.WithWidth(m.width)
+		m.actionBar = m.actionBar.WithWidth(m.width)
+		m.detailView = m.detailView.WithWidth(m.width)
 
 	case containerListMsg:
 		m.containers = msg
@@ -752,6 +1148,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case actionErrorMsg:
 		m.statusMessage = "ERROR: " + string(msg)
 		m.actionInProgress = false
+		return m, nil
+
+	case logsMsg:
+		m.logsContent = string(msg)
+		return m, nil
+
+	case inspectMsg:
+		m.inspectContent = string(msg)
 		return m, nil
 
 	case tickMsg:
@@ -899,7 +1303,17 @@ func (m model) View() string {
 		return m.renderError()
 	}
 
-	// Render based on active tab
+	// Check current view mode
+	switch m.currentView {
+	case viewModeLogs:
+		return m.renderLogs()
+	case viewModeInspect:
+		return m.renderInspect()
+	case viewModePortSelector:
+		return m.renderPortSelector()
+	}
+
+	// Render based on active tab (list view)
 	switch m.activeTab {
 	case 0:
 		return m.renderContainers()
@@ -917,195 +1331,118 @@ func (m model) View() string {
 func (m model) renderContainers() string {
 	var b strings.Builder
 
-	// Top border
-	b.WriteString(greenStyle.Render("┌─────────────────────────────────────────────────────────────────────────────────────┐"))
-	b.WriteString("\n")
+	// Ensure minimum width
+	width := m.width
+	if width < 60 {
+		width = 60
+	}
 
-	// Header
-	headerLeft := greenStyle.Render("│ Docker TUI v2.0.1")
-	headerRight := greenStyle.Render("[F1] Help [Q]uit │")
-	headerSpacing := strings.Repeat(" ", 85-len("│ Docker TUI v2.0.1")-len("[F1] Help [Q]uit │"))
-	b.WriteString(headerLeft + headerSpacing + headerRight)
-	b.WriteString("\n")
+	// Header component with responsive width
+	header := m.header.WithWidth(width)
+	b.WriteString(header.View())
 
-	// Tabs with new design
-	b.WriteString(m.renderTabs())
+	// Tabs component with responsive width
+	tabs := m.tabs.SetActiveTab(m.activeTab).WithWidth(width)
+	b.WriteString(tabs.View())
 
-	// Status line
+	// Status line component with responsive width
 	runningCount := 0
 	for _, c := range m.containers {
 		if c.Status == "RUNNING" {
 			runningCount++
 		}
 	}
-	statusText := fmt.Sprintf(" CONTAINERS (%d total, %d running)", len(m.containers), runningCount)
-	scrollIndicator := m.getScrollIndicator()
-	statusText += scrollIndicator
-	statusLine := greenStyle.Render("│") + cyanStyle.Render(statusText)
-	statusSpacing := strings.Repeat(" ", 85-len(statusText))
-	b.WriteString(statusLine + statusSpacing + greenStyle.Render("│"))
-	b.WriteString("\n")
+	statusLabel := fmt.Sprintf("CONTAINERS (%d total, %d running)", len(m.containers), runningCount)
+	statusComp := NewStatusLineComponent(statusLabel, len(m.containers)).WithWidth(width)
+	statusComp = statusComp.SetScrollIndicator(m.getScrollIndicator())
+	b.WriteString(statusComp.View())
 
-	// Table divider
-	b.WriteString(greenStyle.Render("├──────────────────────┬─────────┬──────┬──────┬─────────────────┬───────────────────┤"))
-	b.WriteString("\n")
+	// Table component with responsive column widths
+	// Calculate proportional widths based on available width
+	availableWidth := width - 7 // Account for borders and separators
+	nameWidth := availableWidth * 22 / 80
+	statusWidth := availableWidth * 9 / 80
+	cpuWidth := availableWidth * 6 / 80
+	memWidth := availableWidth * 6 / 80
+	imageWidth := availableWidth * 17 / 80
+	portsWidth := availableWidth - nameWidth - statusWidth - cpuWidth - memWidth - imageWidth
 
-	// Table header
-	b.WriteString(greenStyle.Render("│"))
-	b.WriteString(normalStyle.Render(" NAME                 "))
-	b.WriteString(greenStyle.Render("│"))
-	b.WriteString(normalStyle.Render(" STATUS  "))
-	b.WriteString(greenStyle.Render("│"))
-	b.WriteString(normalStyle.Render(" CPU% "))
-	b.WriteString(greenStyle.Render("│"))
-	b.WriteString(normalStyle.Render(" MEM  "))
-	b.WriteString(greenStyle.Render("│"))
-	b.WriteString(normalStyle.Render(" IMAGE           "))
-	b.WriteString(greenStyle.Render("│"))
-	b.WriteString(normalStyle.Render(" PORTS               "))
-	b.WriteString(greenStyle.Render("│"))
-	b.WriteString("\n")
-
-	// Header bottom divider
-	b.WriteString(greenStyle.Render("├──────────────────────┼─────────┼──────┼──────┼─────────────────┼───────────────────┤"))
-	b.WriteString("\n")
-
-	// Table rows or loading/empty state
-	if m.loading {
-		// Show loading message
-		b.WriteString(greenStyle.Render("│"))
-		loadingMsg := " Loading containers..."
-		b.WriteString(cyanStyle.Render(loadingMsg))
-		b.WriteString(strings.Repeat(" ", 85-len(loadingMsg)))
-		b.WriteString(greenStyle.Render("│"))
-		b.WriteString("\n")
-	} else if len(m.containers) == 0 {
-		// Show no containers message
-		b.WriteString(greenStyle.Render("│"))
-		noContainersMsg := " No containers found. Press 'r' to refresh."
-		b.WriteString(cyanStyle.Render(noContainersMsg))
-		b.WriteString(strings.Repeat(" ", 85-len(noContainersMsg)))
-		b.WriteString(greenStyle.Render("│"))
-		b.WriteString("\n")
+	headers := []TableHeader{
+		{Label: "NAME", Width: nameWidth},
+		{Label: "STATUS", Width: statusWidth},
+		{Label: "CPU%", Width: cpuWidth},
+		{Label: "MEM", Width: memWidth},
+		{Label: "IMAGE", Width: imageWidth},
+		{Label: "PORTS", Width: portsWidth},
 	}
 
-	// Only render visible items
-	start, end := m.getVisibleRange()
-	for i := start; i < end && i < len(m.containers); i++ {
-		container := m.containers[i]
-		isSelected := i == m.selectedRow
-		isStopped := container.Status == "STOPPED"
+	table := NewTableComponent(headers).WithWidth(width)
 
-		// Row indicator and name
-		b.WriteString(greenStyle.Render("│"))
-		if isSelected {
-			b.WriteString(yellowStyle.Render(">"))
-			b.WriteString(yellowStyle.Render(padRight(container.Name, 21)))
-		} else {
-			b.WriteString(" ")
+	if !m.loading && len(m.containers) > 0 {
+		var rows []TableRow
+		for i, container := range m.containers {
+			isStopped := container.Status == "STOPPED"
+			rowStyle := normalStyle
 			if isStopped {
-				b.WriteString(grayStyle.Render(padRight(container.Name, 21)))
-			} else {
-				b.WriteString(normalStyle.Render(padRight(container.Name, 21)))
+				rowStyle = grayStyle
 			}
-		}
 
-		// Status
-		b.WriteString(greenStyle.Render("│"))
-		statusStyle := greenStyle
-		if container.Status == "STOPPED" {
-			statusStyle = redStyle
-		}
-		b.WriteString(statusStyle.Render(padCenter(container.Status, 9)))
+			// Build cell content with indicator
+			nameCell := container.Name
+			if i == m.selectedRow {
+				nameCell = ">" + nameCell
+			} else {
+				nameCell = " " + nameCell
+			}
 
-		// CPU
-		b.WriteString(greenStyle.Render("│"))
-		cpuText := padCenter(container.CPU, 6)
-		if isStopped {
-			b.WriteString(grayStyle.Render(cpuText))
-		} else {
-			b.WriteString(normalStyle.Render(cpuText))
+			rows = append(rows, TableRow{
+				Cells: []string{
+					nameCell,
+					container.Status,
+					container.CPU,
+					container.Mem,
+					container.Image,
+					container.Ports,
+				},
+				IsSelected: i == m.selectedRow,
+				Style:      rowStyle,
+			})
 		}
-
-		// Memory
-		b.WriteString(greenStyle.Render("│"))
-		memText := padCenter(container.Mem, 6)
-		if isStopped {
-			b.WriteString(grayStyle.Render(memText))
-		} else {
-			b.WriteString(normalStyle.Render(memText))
-		}
-
-		// Image
-		b.WriteString(greenStyle.Render("│"))
-		imageText := padRight(container.Image, 17)
-		if isStopped {
-			b.WriteString(grayStyle.Render(imageText))
-		} else {
-			b.WriteString(normalStyle.Render(imageText))
-		}
-
-		// Ports
-		b.WriteString(greenStyle.Render("│"))
-		portsText := padRight(container.Ports, 20)
-		if isStopped {
-			b.WriteString(grayStyle.Render(portsText))
-		} else {
-			b.WriteString(normalStyle.Render(portsText))
-		}
-
-		b.WriteString(greenStyle.Render("│"))
-		b.WriteString("\n")
+		table = table.SetRows(rows)
 	}
 
-	// Table bottom border
-	b.WriteString(greenStyle.Render("├──────────────────────┴─────────┴──────┴──────┴─────────────────┴───────────────────┤"))
-	b.WriteString("\n")
+	start, end := m.getVisibleRange()
+	table = table.SetVisibleRange(start, end)
+	b.WriteString(table.View())
 
-	// Spacer row or action bar
-	b.WriteString(greenStyle.Render("├─────────────────────────────────────────────────────────────────────────────────────┤"))
-	b.WriteString("\n")
-
-	// Action/status bar
-	if m.statusMessage != "" {
-		// Show status message
-		statusStyle := cyanStyle
-		if strings.HasPrefix(m.statusMessage, "ERROR:") {
-			statusStyle = redStyle
-		}
-		msg := " " + m.statusMessage
-		if len(msg) > 83 {
-			msg = msg[:80] + "..."
-		}
-		b.WriteString(greenStyle.Render("│"))
-		b.WriteString(statusStyle.Render(msg))
-		b.WriteString(strings.Repeat(" ", 85-len(msg)))
-		b.WriteString(greenStyle.Render("│"))
-	} else if len(m.containers) > 0 && m.selectedRow < len(m.containers) {
-		// Show available actions
+	// Action bar component
+	m.actionBar = m.actionBar.SetStatusMessage(m.statusMessage)
+	if m.statusMessage == "" && len(m.containers) > 0 && m.selectedRow < len(m.containers) {
 		selectedContainer := m.containers[m.selectedRow]
 		var actions string
 		if selectedContainer.Status == "RUNNING" {
-			actions = " [S]top | [R]estart"
+			consoleMode := "exec"
+			if m.useDockerDebug {
+				consoleMode = "debug"
+			}
+			actions = fmt.Sprintf(" [S]top | [R]estart | [C]onsole (%s) | [D]ebug toggle", consoleMode)
 		} else {
-			actions = " [S]tart"
+			actions = " [S]tart | [D]ebug toggle"
 		}
 		if selectedContainer.Ports != "" && selectedContainer.Ports != "--" {
-			actions += " | [O]pen in browser"
+			actions += " | [O]pen"
 		}
-		b.WriteString(greenStyle.Render("│"))
-		b.WriteString(cyanStyle.Render(actions))
-		b.WriteString(strings.Repeat(" ", 85-len(actions)))
-		b.WriteString(greenStyle.Render("│"))
+		actions += " | [L]ogs | [I]nspect"
+		m.actionBar = m.actionBar.SetActions(actions)
 	} else {
-		b.WriteString(greenStyle.Render("│"))
-		b.WriteString(strings.Repeat(" ", 85))
-		b.WriteString(greenStyle.Render("│"))
+		m.actionBar = m.actionBar.SetActions("")
 	}
+	actionBar := m.actionBar.WithWidth(width)
+	b.WriteString(actionBar.View())
 	b.WriteString("\n")
 
-	// Bottom border
-	b.WriteString(greenStyle.Render("└─────────────────────────────────────────────────────────────────────────────────────┘"))
+	// Bottom border - responsive
+	b.WriteString(greenStyle.Render("└" + strings.Repeat("─", width-2) + "┘"))
 
 	return containerStyle.Render(b.String())
 }
@@ -1113,132 +1450,79 @@ func (m model) renderContainers() string {
 func (m model) renderImages() string {
 	var b strings.Builder
 
-	// Top border
-	b.WriteString(greenStyle.Render("┌─────────────────────────────────────────────────────────────────────────────────────┐"))
-	b.WriteString("\n")
+	// Ensure minimum width
+	width := m.width
+	if width < 60 {
+		width = 60
+	}
 
-	// Header
-	headerLeft := greenStyle.Render("│ Docker TUI v2.0.1")
-	headerRight := greenStyle.Render("[F1] Help [Q]uit │")
-	headerSpacing := strings.Repeat(" ", 85-len("│ Docker TUI v2.0.1")-len("[F1] Help [Q]uit │"))
-	b.WriteString(headerLeft + headerSpacing + headerRight)
-	b.WriteString("\n")
+	// Header component with responsive width
+	header := m.header.WithWidth(width)
+	b.WriteString(header.View())
 
-	// Tabs with new design
-	b.WriteString(m.renderTabs())
+	// Tabs component with responsive width
+	tabs := m.tabs.WithWidth(width)
+	b.WriteString(tabs.View())
 
-	// Status line
-	statusText := fmt.Sprintf(" IMAGES (%d total)", len(m.images))
-	scrollIndicator := m.getScrollIndicator()
-	statusText += scrollIndicator
-	statusLine := greenStyle.Render("│") + cyanStyle.Render(statusText)
-	statusSpacing := strings.Repeat(" ", 85-len(statusText))
-	b.WriteString(statusLine + statusSpacing + greenStyle.Render("│"))
-	b.WriteString("\n")
+	// Status line component with responsive width
+	statusComp := NewStatusLineComponent("IMAGES", len(m.images)).WithWidth(width)
+	statusComp = statusComp.SetScrollIndicator(m.getScrollIndicator())
+	b.WriteString(statusComp.View())
 
-	// Table divider
-	b.WriteString(greenStyle.Render("├────────────┬──────────────────────────────┬─────────────┬──────────┬──────────────┤"))
-	b.WriteString("\n")
+	// Table component with responsive column widths
+	availableWidth := width - 7
+	idWidth := availableWidth * 12 / 79
+	repoWidth := availableWidth * 30 / 79
+	tagWidth := availableWidth * 13 / 79
+	sizeWidth := availableWidth * 10 / 79
+	createdWidth := availableWidth - idWidth - repoWidth - tagWidth - sizeWidth
 
-	// Table header
-	b.WriteString(greenStyle.Render("│"))
-	b.WriteString(normalStyle.Render(" IMAGE ID   "))
-	b.WriteString(greenStyle.Render("│"))
-	b.WriteString(normalStyle.Render(" REPOSITORY                   "))
-	b.WriteString(greenStyle.Render("│"))
-	b.WriteString(normalStyle.Render(" TAG         "))
-	b.WriteString(greenStyle.Render("│"))
-	b.WriteString(normalStyle.Render(" SIZE     "))
-	b.WriteString(greenStyle.Render("│"))
-	b.WriteString(normalStyle.Render(" CREATED      "))
-	b.WriteString(greenStyle.Render("│"))
-	b.WriteString("\n")
+	headers := []TableHeader{
+		{Label: "IMAGE ID", Width: idWidth},
+		{Label: "REPOSITORY", Width: repoWidth},
+		{Label: "TAG", Width: tagWidth},
+		{Label: "SIZE", Width: sizeWidth},
+		{Label: "CREATED", Width: createdWidth},
+	}
 
-	// Header bottom divider
-	b.WriteString(greenStyle.Render("├────────────┼──────────────────────────────┼─────────────┼──────────┼──────────────┤"))
-	b.WriteString("\n")
-
-	// Table rows
+	var rows []TableRow
 	if m.loading {
-		b.WriteString(greenStyle.Render("│"))
-		loadingMsg := " Loading images..."
-		b.WriteString(cyanStyle.Render(loadingMsg))
-		b.WriteString(strings.Repeat(" ", 85-len(loadingMsg)))
-		b.WriteString(greenStyle.Render("│"))
-		b.WriteString("\n")
-	} else if len(m.images) == 0 {
-		b.WriteString(greenStyle.Render("│"))
-		noImagesMsg := " No images found."
-		b.WriteString(cyanStyle.Render(noImagesMsg))
-		b.WriteString(strings.Repeat(" ", 85-len(noImagesMsg)))
-		b.WriteString(greenStyle.Render("│"))
-		b.WriteString("\n")
-	}
-
-	// Only render visible items
-	start, end := m.getVisibleRange()
-	for i := start; i < end && i < len(m.images); i++ {
-		image := m.images[i]
-		isSelected := i == m.selectedRow
-
-		b.WriteString(greenStyle.Render("│"))
-		if isSelected {
-			b.WriteString(yellowStyle.Render(">"))
-			b.WriteString(yellowStyle.Render(padRight(image.ID, 11)))
-		} else {
-			b.WriteString(" ")
-			b.WriteString(normalStyle.Render(padRight(image.ID, 11)))
-		}
-
-		b.WriteString(greenStyle.Render("│"))
-		repoText := padRight(image.Repository, 30)
-		if isSelected {
-			b.WriteString(yellowStyle.Render(repoText))
-		} else {
-			b.WriteString(normalStyle.Render(repoText))
-		}
-
-		b.WriteString(greenStyle.Render("│"))
-		tagText := padRight(image.Tag, 13)
-		b.WriteString(normalStyle.Render(tagText))
-
-		b.WriteString(greenStyle.Render("│"))
-		sizeText := padRight(image.Size, 10)
-		b.WriteString(normalStyle.Render(sizeText))
-
-		b.WriteString(greenStyle.Render("│"))
-		createdText := padRight(image.Created, 14)
-		b.WriteString(normalStyle.Render(createdText))
-
-		b.WriteString(greenStyle.Render("│"))
-		b.WriteString("\n")
-	}
-
-	// Table bottom border
-	b.WriteString(greenStyle.Render("├────────────┴──────────────────────────────┴─────────────┴──────────┴──────────────┤"))
-	b.WriteString("\n")
-
-	// Status/action bar
-	b.WriteString(greenStyle.Render("│"))
-	if m.statusMessage != "" {
-		statusStyle := cyanStyle
-		if strings.HasPrefix(m.statusMessage, "ERROR:") {
-			statusStyle = redStyle
-		}
-		msg := " " + m.statusMessage
-		if len(msg) > 83 {
-			msg = msg[:80] + "..."
-		}
-		b.WriteString(statusStyle.Render(msg))
-		b.WriteString(strings.Repeat(" ", 85-len(msg)))
+		// Empty rows array will show "No items found" message
 	} else {
-		b.WriteString(strings.Repeat(" ", 85))
+		start, end := m.getVisibleRange()
+		for i := start; i < end && i < len(m.images); i++ {
+			image := m.images[i]
+			isSelected := i == m.selectedRow
+
+			cells := []string{
+				">" + padRight(image.ID, idWidth-1),
+				padRight(image.Repository, repoWidth),
+				padRight(image.Tag, tagWidth),
+				padRight(image.Size, sizeWidth),
+				padRight(image.Created, createdWidth),
+			}
+
+			rows = append(rows, TableRow{
+				Cells:      cells,
+				IsSelected: isSelected,
+				Style:      normalStyle,
+			})
+		}
 	}
-	b.WriteString(greenStyle.Render("│"))
+
+	table := NewTableComponent(headers).WithWidth(width)
+	table = table.SetRows(rows)
+	start, end := m.getVisibleRange()
+	table = table.SetVisibleRange(start, end)
+	b.WriteString(table.View())
+
+	// Action bar component with responsive width
+	actionBar := m.actionBar.SetStatusMessage(m.statusMessage).WithWidth(width)
+	b.WriteString(actionBar.View())
 	b.WriteString("\n")
 
-	// Bottom border
-	b.WriteString(greenStyle.Render("└─────────────────────────────────────────────────────────────────────────────────────┘"))
+	// Bottom border - responsive
+	b.WriteString(greenStyle.Render("└" + strings.Repeat("─", width-2) + "┘"))
 
 	return containerStyle.Render(b.String())
 }
@@ -1246,122 +1530,76 @@ func (m model) renderImages() string {
 func (m model) renderVolumes() string {
 	var b strings.Builder
 
-	// Top border
-	b.WriteString(greenStyle.Render("┌─────────────────────────────────────────────────────────────────────────────────────┐"))
-	b.WriteString("\n")
+	// Ensure minimum width
+	width := m.width
+	if width < 60 {
+		width = 60
+	}
 
-	// Header
-	headerLeft := greenStyle.Render("│ Docker TUI v2.0.1")
-	headerRight := greenStyle.Render("[F1] Help [Q]uit │")
-	headerSpacing := strings.Repeat(" ", 85-len("│ Docker TUI v2.0.1")-len("[F1] Help [Q]uit │"))
-	b.WriteString(headerLeft + headerSpacing + headerRight)
-	b.WriteString("\n")
+	// Header component with responsive width
+	header := m.header.WithWidth(width)
+	b.WriteString(header.View())
 
-	// Tabs with new design
-	b.WriteString(m.renderTabs())
+	// Tabs component with responsive width
+	tabs := m.tabs.WithWidth(width)
+	b.WriteString(tabs.View())
 
-	// Status line
-	statusText := fmt.Sprintf(" VOLUMES (%d total)", len(m.volumes))
-	scrollIndicator := m.getScrollIndicator()
-	statusText += scrollIndicator
-	statusLine := greenStyle.Render("│") + cyanStyle.Render(statusText)
-	statusSpacing := strings.Repeat(" ", 85-len(statusText))
-	b.WriteString(statusLine + statusSpacing + greenStyle.Render("│"))
-	b.WriteString("\n")
+	// Status line component with responsive width
+	statusComp := NewStatusLineComponent("VOLUMES", len(m.volumes)).WithWidth(width)
+	statusComp = statusComp.SetScrollIndicator(m.getScrollIndicator())
+	b.WriteString(statusComp.View())
 
-	// Table divider
-	b.WriteString(greenStyle.Render("├─────────────────────────┬────────┬──────────────────────────────┬──────────────┤"))
-	b.WriteString("\n")
+	// Table component with responsive column widths
+	availableWidth := width - 7
+	nameWidth := availableWidth * 25 / 77
+	driverWidth := availableWidth * 8 / 77
+	mountWidth := availableWidth * 30 / 77
+	createdWidth := availableWidth - nameWidth - driverWidth - mountWidth
 
-	// Table header
-	b.WriteString(greenStyle.Render("│"))
-	b.WriteString(normalStyle.Render(" NAME                     "))
-	b.WriteString(greenStyle.Render("│"))
-	b.WriteString(normalStyle.Render(" DRIVER "))
-	b.WriteString(greenStyle.Render("│"))
-	b.WriteString(normalStyle.Render(" MOUNTPOINT                   "))
-	b.WriteString(greenStyle.Render("│"))
-	b.WriteString(normalStyle.Render(" CREATED      "))
-	b.WriteString(greenStyle.Render("│"))
-	b.WriteString("\n")
+	headers := []TableHeader{
+		{Label: "NAME", Width: nameWidth},
+		{Label: "DRIVER", Width: driverWidth},
+		{Label: "MOUNTPOINT", Width: mountWidth},
+		{Label: "CREATED", Width: createdWidth},
+	}
 
-	// Header bottom divider
-	b.WriteString(greenStyle.Render("├─────────────────────────┼────────┼──────────────────────────────┼──────────────┤"))
-	b.WriteString("\n")
-
-	// Table rows
+	var rows []TableRow
 	if m.loading {
-		b.WriteString(greenStyle.Render("│"))
-		loadingMsg := " Loading volumes..."
-		b.WriteString(cyanStyle.Render(loadingMsg))
-		b.WriteString(strings.Repeat(" ", 85-len(loadingMsg)))
-		b.WriteString(greenStyle.Render("│"))
-		b.WriteString("\n")
-	} else if len(m.volumes) == 0 {
-		b.WriteString(greenStyle.Render("│"))
-		noVolumesMsg := " No volumes found."
-		b.WriteString(cyanStyle.Render(noVolumesMsg))
-		b.WriteString(strings.Repeat(" ", 85-len(noVolumesMsg)))
-		b.WriteString(greenStyle.Render("│"))
-		b.WriteString("\n")
-	}
-
-	// Only render visible items
-	start, end := m.getVisibleRange()
-	for i := start; i < end && i < len(m.volumes); i++ {
-		volume := m.volumes[i]
-		isSelected := i == m.selectedRow
-
-		b.WriteString(greenStyle.Render("│"))
-		if isSelected {
-			b.WriteString(yellowStyle.Render(">"))
-			b.WriteString(yellowStyle.Render(padRight(volume.Name, 24)))
-		} else {
-			b.WriteString(" ")
-			b.WriteString(normalStyle.Render(padRight(volume.Name, 24)))
-		}
-
-		b.WriteString(greenStyle.Render("│"))
-		driverText := padRight(volume.Driver, 8)
-		b.WriteString(normalStyle.Render(driverText))
-
-		b.WriteString(greenStyle.Render("│"))
-		mountText := padRight(volume.Mountpoint, 30)
-		b.WriteString(normalStyle.Render(mountText))
-
-		b.WriteString(greenStyle.Render("│"))
-		createdText := padRight(volume.Created, 14)
-		b.WriteString(normalStyle.Render(createdText))
-
-		b.WriteString(greenStyle.Render("│"))
-		b.WriteString("\n")
-	}
-
-	// Table bottom border
-	b.WriteString(greenStyle.Render("├─────────────────────────┴────────┴──────────────────────────────┴──────────────┤"))
-	b.WriteString("\n")
-
-	// Status/action bar
-	b.WriteString(greenStyle.Render("│"))
-	if m.statusMessage != "" {
-		statusStyle := cyanStyle
-		if strings.HasPrefix(m.statusMessage, "ERROR:") {
-			statusStyle = redStyle
-		}
-		msg := " " + m.statusMessage
-		if len(msg) > 83 {
-			msg = msg[:80] + "..."
-		}
-		b.WriteString(statusStyle.Render(msg))
-		b.WriteString(strings.Repeat(" ", 85-len(msg)))
+		// Empty rows array will show "No items found" message
 	} else {
-		b.WriteString(strings.Repeat(" ", 85))
+		start, end := m.getVisibleRange()
+		for i := start; i < end && i < len(m.volumes); i++ {
+			volume := m.volumes[i]
+			isSelected := i == m.selectedRow
+
+			cells := []string{
+				">" + padRight(volume.Name, nameWidth-1),
+				padRight(volume.Driver, driverWidth),
+				padRight(volume.Mountpoint, mountWidth),
+				padRight(volume.Created, createdWidth),
+			}
+
+			rows = append(rows, TableRow{
+				Cells:      cells,
+				IsSelected: isSelected,
+				Style:      normalStyle,
+			})
+		}
 	}
-	b.WriteString(greenStyle.Render("│"))
+
+	table := NewTableComponent(headers).WithWidth(width)
+	table = table.SetRows(rows)
+	start, end := m.getVisibleRange()
+	table = table.SetVisibleRange(start, end)
+	b.WriteString(table.View())
+
+	// Action bar component with responsive width
+	actionBar := m.actionBar.SetStatusMessage(m.statusMessage).WithWidth(width)
+	b.WriteString(actionBar.View())
 	b.WriteString("\n")
 
-	// Bottom border
-	b.WriteString(greenStyle.Render("└─────────────────────────────────────────────────────────────────────────────────────┘"))
+	// Bottom border - responsive
+	b.WriteString(greenStyle.Render("└" + strings.Repeat("─", width-2) + "┘"))
 
 	return containerStyle.Render(b.String())
 }
@@ -1369,223 +1607,333 @@ func (m model) renderVolumes() string {
 func (m model) renderNetworks() string {
 	var b strings.Builder
 
-	// Top border
-	b.WriteString(greenStyle.Render("┌─────────────────────────────────────────────────────────────────────────────────────┐"))
-	b.WriteString("\n")
+	// Ensure minimum width
+	width := m.width
+	if width < 60 {
+		width = 60
+	}
 
-	// Header
-	headerLeft := greenStyle.Render("│ Docker TUI v2.0.1")
-	headerRight := greenStyle.Render("[F1] Help [Q]uit │")
-	headerSpacing := strings.Repeat(" ", 85-len("│ Docker TUI v2.0.1")-len("[F1] Help [Q]uit │"))
-	b.WriteString(headerLeft + headerSpacing + headerRight)
-	b.WriteString("\n")
+	// Header component with responsive width
+	header := m.header.WithWidth(width)
+	b.WriteString(header.View())
 
-	// Tabs with new design
-	b.WriteString(m.renderTabs())
+	// Tabs component with responsive width
+	tabs := m.tabs.WithWidth(width)
+	b.WriteString(tabs.View())
 
-	// Status line
-	statusText := fmt.Sprintf(" NETWORKS (%d total)", len(m.networks))
-	scrollIndicator := m.getScrollIndicator()
-	statusText += scrollIndicator
-	statusLine := greenStyle.Render("│") + cyanStyle.Render(statusText)
-	statusSpacing := strings.Repeat(" ", 85-len(statusText))
-	b.WriteString(statusLine + statusSpacing + greenStyle.Render("│"))
-	b.WriteString("\n")
+	// Status line component with responsive width
+	statusComp := NewStatusLineComponent("NETWORKS", len(m.networks)).WithWidth(width)
+	statusComp = statusComp.SetScrollIndicator(m.getScrollIndicator())
+	b.WriteString(statusComp.View())
 
-	// Table divider
-	b.WriteString(greenStyle.Render("├────────────┬────────────────────┬──────────┬────────┬──────────────────┬──────────┤"))
-	b.WriteString("\n")
+	// Table component with responsive column widths
+	availableWidth := width - 7
+	idWidth := availableWidth * 12 / 78
+	nameWidth := availableWidth * 20 / 78
+	driverWidth := availableWidth * 10 / 78
+	scopeWidth := availableWidth * 8 / 78
+	ipv4Width := availableWidth * 18 / 78
+	ipv6Width := availableWidth - idWidth - nameWidth - driverWidth - scopeWidth - ipv4Width
 
-	// Table header
-	b.WriteString(greenStyle.Render("│"))
-	b.WriteString(normalStyle.Render(" NETWORK ID "))
-	b.WriteString(greenStyle.Render("│"))
-	b.WriteString(normalStyle.Render(" NAME               "))
-	b.WriteString(greenStyle.Render("│"))
-	b.WriteString(normalStyle.Render(" DRIVER   "))
-	b.WriteString(greenStyle.Render("│"))
-	b.WriteString(normalStyle.Render(" SCOPE  "))
-	b.WriteString(greenStyle.Render("│"))
-	b.WriteString(normalStyle.Render(" IPv4             "))
-	b.WriteString(greenStyle.Render("│"))
-	b.WriteString(normalStyle.Render(" IPv6     "))
-	b.WriteString(greenStyle.Render("│"))
-	b.WriteString("\n")
+	headers := []TableHeader{
+		{Label: "NETWORK ID", Width: idWidth},
+		{Label: "NAME", Width: nameWidth},
+		{Label: "DRIVER", Width: driverWidth},
+		{Label: "SCOPE", Width: scopeWidth},
+		{Label: "IPv4", Width: ipv4Width},
+		{Label: "IPv6", Width: ipv6Width},
+	}
 
-	// Header bottom divider
-	b.WriteString(greenStyle.Render("├────────────┼────────────────────┼──────────┼────────┼──────────────────┼──────────┤"))
-	b.WriteString("\n")
-
-	// Table rows
+	var rows []TableRow
 	if m.loading {
-		b.WriteString(greenStyle.Render("│"))
-		loadingMsg := " Loading networks..."
-		b.WriteString(cyanStyle.Render(loadingMsg))
-		b.WriteString(strings.Repeat(" ", 85-len(loadingMsg)))
-		b.WriteString(greenStyle.Render("│"))
-		b.WriteString("\n")
-	} else if len(m.networks) == 0 {
-		b.WriteString(greenStyle.Render("│"))
-		noNetworksMsg := " No networks found."
-		b.WriteString(cyanStyle.Render(noNetworksMsg))
-		b.WriteString(strings.Repeat(" ", 85-len(noNetworksMsg)))
-		b.WriteString(greenStyle.Render("│"))
-		b.WriteString("\n")
-	}
-
-	// Only render visible items
-	start, end := m.getVisibleRange()
-	for i := start; i < end && i < len(m.networks); i++ {
-		network := m.networks[i]
-		isSelected := i == m.selectedRow
-
-		b.WriteString(greenStyle.Render("│"))
-		if isSelected {
-			b.WriteString(yellowStyle.Render(">"))
-			b.WriteString(yellowStyle.Render(padRight(network.ID, 11)))
-		} else {
-			b.WriteString(" ")
-			b.WriteString(normalStyle.Render(padRight(network.ID, 11)))
-		}
-
-		b.WriteString(greenStyle.Render("│"))
-		nameText := padRight(network.Name, 20)
-		if isSelected {
-			b.WriteString(yellowStyle.Render(nameText))
-		} else {
-			b.WriteString(normalStyle.Render(nameText))
-		}
-
-		b.WriteString(greenStyle.Render("│"))
-		driverText := padRight(network.Driver, 10)
-		b.WriteString(normalStyle.Render(driverText))
-
-		b.WriteString(greenStyle.Render("│"))
-		scopeText := padRight(network.Scope, 8)
-		b.WriteString(normalStyle.Render(scopeText))
-
-		b.WriteString(greenStyle.Render("│"))
-		ipv4Text := padRight(network.IPv4, 18)
-		b.WriteString(normalStyle.Render(ipv4Text))
-
-		b.WriteString(greenStyle.Render("│"))
-		ipv6Text := padRight(network.IPv6, 10)
-		b.WriteString(normalStyle.Render(ipv6Text))
-
-		b.WriteString(greenStyle.Render("│"))
-		b.WriteString("\n")
-	}
-
-	// Table bottom border
-	b.WriteString(greenStyle.Render("├────────────┴────────────────────┴──────────┴────────┴──────────────────┴──────────┤"))
-	b.WriteString("\n")
-
-	// Status/action bar
-	b.WriteString(greenStyle.Render("│"))
-	if m.statusMessage != "" {
-		statusStyle := cyanStyle
-		if strings.HasPrefix(m.statusMessage, "ERROR:") {
-			statusStyle = redStyle
-		}
-		msg := " " + m.statusMessage
-		if len(msg) > 83 {
-			msg = msg[:80] + "..."
-		}
-		b.WriteString(statusStyle.Render(msg))
-		b.WriteString(strings.Repeat(" ", 85-len(msg)))
+		// Empty rows array will show "No items found" message
 	} else {
-		b.WriteString(strings.Repeat(" ", 85))
+		start, end := m.getVisibleRange()
+		for i := start; i < end && i < len(m.networks); i++ {
+			network := m.networks[i]
+			isSelected := i == m.selectedRow
+
+			cells := []string{
+				">" + padRight(network.ID, idWidth-1),
+				padRight(network.Name, nameWidth),
+				padRight(network.Driver, driverWidth),
+				padRight(network.Scope, scopeWidth),
+				padRight(network.IPv4, ipv4Width),
+				padRight(network.IPv6, ipv6Width),
+			}
+
+			rows = append(rows, TableRow{
+				Cells:      cells,
+				IsSelected: isSelected,
+				Style:      normalStyle,
+			})
+		}
 	}
-	b.WriteString(greenStyle.Render("│"))
+
+	table := NewTableComponent(headers).WithWidth(width)
+	table = table.SetRows(rows)
+	start, end := m.getVisibleRange()
+	table = table.SetVisibleRange(start, end)
+	b.WriteString(table.View())
+
+	// Action bar component with responsive width
+	actionBar := m.actionBar.WithWidth(width)
+	actionBar = actionBar.SetStatusMessage(m.statusMessage)
+	b.WriteString(actionBar.View())
 	b.WriteString("\n")
 
-	// Bottom border
-	b.WriteString(greenStyle.Render("└─────────────────────────────────────────────────────────────────────────────────────┘"))
+	// Bottom border (responsive)
+	b.WriteString(greenStyle.Render("└" + strings.Repeat("─", width-2) + "┘"))
 
 	return containerStyle.Render(b.String())
 }
 
+func (m model) renderLogs() string {
+	containerName := "Container"
+	if m.selectedContainer != nil {
+		containerName = m.selectedContainer.Name
+	}
+
+	width := m.width
+	if width < 60 {
+		width = 60
+	}
+
+	title := fmt.Sprintf("Logs: %s", containerName)
+	detailView := NewDetailViewComponent(title, 15).WithWidth(width)
+	detailView = detailView.SetContent(m.logsContent)
+	detailView = detailView.SetScroll(m.logsScrollOffset)
+
+	return containerStyle.Render(detailView.View())
+}
+
+func (m model) renderInspect() string {
+	containerName := "Container"
+	if m.selectedContainer != nil {
+		containerName = m.selectedContainer.Name
+	}
+
+	width := m.width
+	if width < 60 {
+		width = 60
+	}
+
+	title := fmt.Sprintf("Inspect: %s", containerName)
+	detailView := NewDetailViewComponent(title, 15).WithWidth(width)
+	detailView = detailView.SetContent(m.inspectContent)
+	detailView = detailView.SetScroll(0)
+
+	return containerStyle.Render(detailView.View())
+}
+
+func (m model) renderPortSelector() string {
+	// Use responsive dimensions
+	width := m.width
+	if width < 60 {
+		width = 60
+	}
+	height := m.height
+	if height < 20 {
+		height = 20
+	}
+
+	// Render base view (containers list)
+	baseView := m.renderContainers()
+
+	containerName := "Container"
+	if m.selectedContainer != nil {
+		containerName = m.selectedContainer.Name
+	}
+
+	// Dim the base view by applying a gray style
+	dimStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#666666"))
+
+	dimmedBase := dimStyle.Render(baseView)
+
+	// Modal border style with solid background
+	modalWidth := 44
+	if modalWidth > width-10 {
+		modalWidth = width - 10
+	}
+
+	modalStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("#FFFF00")).
+		Background(lipgloss.Color("#000000")).
+		Foreground(lipgloss.Color("#FFFFFF")).
+		Padding(1, 2).
+		Width(modalWidth)
+
+	// Build modal content
+	var modalContent strings.Builder
+
+	// Title
+	title := fmt.Sprintf("Select Port - %s", containerName)
+	maxTitleWidth := modalWidth - 4
+	if len(title) > maxTitleWidth {
+		title = title[:maxTitleWidth-3] + "..."
+	}
+	modalContent.WriteString(cyanStyle.Bold(true).Render(title) + "\n\n")
+
+	// Port list
+	for i, port := range m.availablePorts {
+		prefix := "  "
+		style := normalStyle
+		if i == m.selectedPortIdx {
+			prefix = "► "
+			style = yellowStyle.Bold(true)
+		}
+
+		portLine := fmt.Sprintf("%slocalhost:%s", prefix, port)
+		modalContent.WriteString(style.Render(portLine) + "\n")
+	}
+
+	// Controls
+	modalContent.WriteString("\n")
+	modalContent.WriteString(grayStyle.Render("↑↓:Navigate  ENTER:Open  ESC:Cancel"))
+
+	// Render styled modal
+	modal := modalStyle.Render(modalContent.String())
+
+	// Create layers using Lipgloss with responsive dimensions
+	// Layer 1: Dimmed base view
+	baseLayer := lipgloss.NewStyle().
+		Width(width).
+		Height(height).
+		Render(dimmedBase)
+
+	// Layer 2: Modal centered on top
+	modalPlaced := lipgloss.Place(
+		width, height,
+		lipgloss.Center, lipgloss.Center,
+		modal,
+		lipgloss.WithWhitespaceChars(" "),
+		lipgloss.WithWhitespaceForeground(lipgloss.NoColor{}),
+	)
+
+	// Composite the layers: base + modal overlay
+	// Split into lines and overlay
+	baseLines := strings.Split(baseLayer, "\n")
+	modalLines := strings.Split(modalPlaced, "\n")
+
+	var result strings.Builder
+	for i := 0; i < len(baseLines) && i < len(modalLines); i++ {
+		// If modal line has content (non-space), use it; otherwise use base
+		if strings.TrimSpace(modalLines[i]) != "" {
+			result.WriteString(modalLines[i])
+		} else {
+			result.WriteString(baseLines[i])
+		}
+		result.WriteString("\n")
+	}
+
+	return result.String()
+}
+
 func (m model) renderError() string {
+	width := m.width
+	if width < 60 {
+		width = 60
+	}
+	contentWidth := width - 2
+
 	var b strings.Builder
 
-	b.WriteString(greenStyle.Render("┌─────────────────────────────────────────────────────────────────────────────────────┐"))
+	b.WriteString(greenStyle.Render("┌" + strings.Repeat("─", contentWidth) + "┐"))
 	b.WriteString("\n")
-	b.WriteString(greenStyle.Render("│") + redStyle.Render(" Docker TUI - Error") + strings.Repeat(" ", 65) + greenStyle.Render("│"))
+
+	title := " Docker TUI - Error"
+	b.WriteString(greenStyle.Render("│") + redStyle.Render(title) + strings.Repeat(" ", contentWidth-len(title)) + greenStyle.Render("│"))
 	b.WriteString("\n")
-	b.WriteString(greenStyle.Render("├─────────────────────────────────────────────────────────────────────────────────────┤"))
+	b.WriteString(greenStyle.Render("├" + strings.Repeat("─", contentWidth) + "┤"))
 	b.WriteString("\n")
-	b.WriteString(greenStyle.Render("│") + strings.Repeat(" ", 85) + greenStyle.Render("│"))
+	b.WriteString(greenStyle.Render("│") + strings.Repeat(" ", contentWidth) + greenStyle.Render("│"))
 	b.WriteString("\n")
 
 	errMsg := m.err.Error()
-	if len(errMsg) > 80 {
-		errMsg = errMsg[:77] + "..."
+	maxErrLen := contentWidth - 10
+	if len(errMsg) > maxErrLen {
+		errMsg = errMsg[:maxErrLen-3] + "..."
 	}
-	b.WriteString(greenStyle.Render("│") + redStyle.Render(" Error: "+errMsg) + strings.Repeat(" ", 85-len(" Error: "+errMsg)) + greenStyle.Render("│"))
+	errorLine := " Error: " + errMsg
+	b.WriteString(greenStyle.Render("│") + redStyle.Render(errorLine) + strings.Repeat(" ", contentWidth-len(errorLine)) + greenStyle.Render("│"))
 	b.WriteString("\n")
-	b.WriteString(greenStyle.Render("│") + strings.Repeat(" ", 85) + greenStyle.Render("│"))
+	b.WriteString(greenStyle.Render("│") + strings.Repeat(" ", contentWidth) + greenStyle.Render("│"))
 	b.WriteString("\n")
-	b.WriteString(greenStyle.Render("│") + normalStyle.Render(" Troubleshooting:") + strings.Repeat(" ", 67) + greenStyle.Render("│"))
+
+	troubleLine := " Troubleshooting:"
+	b.WriteString(greenStyle.Render("│") + normalStyle.Render(troubleLine) + strings.Repeat(" ", contentWidth-len(troubleLine)) + greenStyle.Render("│"))
 	b.WriteString("\n")
-	b.WriteString(greenStyle.Render("│") + normalStyle.Render("  - Make sure Docker is running") + strings.Repeat(" ", 53) + greenStyle.Render("│"))
+
+	tip1 := "  - Make sure Docker is running"
+	b.WriteString(greenStyle.Render("│") + normalStyle.Render(tip1) + strings.Repeat(" ", contentWidth-len(tip1)) + greenStyle.Render("│"))
 	b.WriteString("\n")
-	b.WriteString(greenStyle.Render("│") + normalStyle.Render("  - Check Docker socket permissions") + strings.Repeat(" ", 49) + greenStyle.Render("│"))
+
+	tip2 := "  - Check Docker socket permissions"
+	b.WriteString(greenStyle.Render("│") + normalStyle.Render(tip2) + strings.Repeat(" ", contentWidth-len(tip2)) + greenStyle.Render("│"))
 	b.WriteString("\n")
-	b.WriteString(greenStyle.Render("│") + normalStyle.Render("  - Verify DOCKER_HOST environment variable") + strings.Repeat(" ", 41) + greenStyle.Render("│"))
+
+	tip3 := "  - Verify DOCKER_HOST environment variable"
+	b.WriteString(greenStyle.Render("│") + normalStyle.Render(tip3) + strings.Repeat(" ", contentWidth-len(tip3)) + greenStyle.Render("│"))
 	b.WriteString("\n")
-	b.WriteString(greenStyle.Render("│") + strings.Repeat(" ", 85) + greenStyle.Render("│"))
+	b.WriteString(greenStyle.Render("│") + strings.Repeat(" ", contentWidth) + greenStyle.Render("│"))
 	b.WriteString("\n")
-	b.WriteString(greenStyle.Render("│") + cyanStyle.Render(" Press 'q' to quit") + strings.Repeat(" ", 66) + greenStyle.Render("│"))
+
+	quitLine := " Press 'q' to quit"
+	b.WriteString(greenStyle.Render("│") + cyanStyle.Render(quitLine) + strings.Repeat(" ", contentWidth-len(quitLine)) + greenStyle.Render("│"))
 	b.WriteString("\n")
-	b.WriteString(greenStyle.Render("└─────────────────────────────────────────────────────────────────────────────────────┘"))
+	b.WriteString(greenStyle.Render("└" + strings.Repeat("─", contentWidth) + "┘"))
 
 	return containerStyle.Render(b.String())
 }
 
 func (m model) renderHelp() string {
+	width := m.width
+	if width < 60 {
+		width = 60
+	}
+	contentWidth := width - 2
+
 	var b strings.Builder
 
-	b.WriteString(greenStyle.Render("┌─────────────────────────────────────────────────────────────────────────────────────┐"))
+	// Helper function to render a line
+	renderLine := func(text string, style lipgloss.Style) {
+		if len(text) > contentWidth {
+			text = text[:contentWidth]
+		}
+		b.WriteString(greenStyle.Render("│") + style.Render(text) + strings.Repeat(" ", contentWidth-len(text)) + greenStyle.Render("│"))
+		b.WriteString("\n")
+	}
+
+	b.WriteString(greenStyle.Render("┌" + strings.Repeat("─", contentWidth) + "┐"))
 	b.WriteString("\n")
-	b.WriteString(greenStyle.Render("│") + yellowStyle.Render(" Docker TUI - Help") + strings.Repeat(" ", 66) + greenStyle.Render("│"))
+	renderLine(" Docker TUI - Help", yellowStyle)
+	b.WriteString(greenStyle.Render("├" + strings.Repeat("─", contentWidth) + "┤"))
 	b.WriteString("\n")
-	b.WriteString(greenStyle.Render("├─────────────────────────────────────────────────────────────────────────────────────┤"))
-	b.WriteString("\n")
-	b.WriteString(greenStyle.Render("│") + normalStyle.Render(" Navigation:") + strings.Repeat(" ", 72) + greenStyle.Render("│"))
-	b.WriteString("\n")
-	b.WriteString(greenStyle.Render("│") + normalStyle.Render("   ↑/k      - Move selection up (auto-scrolls)") + strings.Repeat(" ", 37) + greenStyle.Render("│"))
-	b.WriteString("\n")
-	b.WriteString(greenStyle.Render("│") + normalStyle.Render("   ↓/j      - Move selection down (auto-scrolls)") + strings.Repeat(" ", 35) + greenStyle.Render("│"))
-	b.WriteString("\n")
-	b.WriteString(greenStyle.Render("│") + normalStyle.Render("   ←/→ or h/l - Switch tabs") + strings.Repeat(" ", 56) + greenStyle.Render("│"))
-	b.WriteString("\n")
-	b.WriteString(greenStyle.Render("│") + normalStyle.Render("   1-4 or ^D/^I/^V/^N - Jump to specific tab") + strings.Repeat(" ", 39) + greenStyle.Render("│"))
-	b.WriteString("\n")
-	b.WriteString(greenStyle.Render("│") + strings.Repeat(" ", 85) + greenStyle.Render("│"))
-	b.WriteString("\n")
-	b.WriteString(greenStyle.Render("│") + normalStyle.Render(" Container Actions:") + strings.Repeat(" ", 65) + greenStyle.Render("│"))
-	b.WriteString("\n")
-	b.WriteString(greenStyle.Render("│") + normalStyle.Render("   s        - Start/Stop selected container") + strings.Repeat(" ", 40) + greenStyle.Render("│"))
-	b.WriteString("\n")
-	b.WriteString(greenStyle.Render("│") + normalStyle.Render("   r        - Restart selected container") + strings.Repeat(" ", 43) + greenStyle.Render("│"))
-	b.WriteString("\n")
-	b.WriteString(greenStyle.Render("│") + normalStyle.Render("   o        - Open container port in browser") + strings.Repeat(" ", 39) + greenStyle.Render("│"))
-	b.WriteString("\n")
-	b.WriteString(greenStyle.Render("│") + normalStyle.Render("   Enter    - Refresh container list") + strings.Repeat(" ", 47) + greenStyle.Render("│"))
-	b.WriteString("\n")
-	b.WriteString(greenStyle.Render("│") + strings.Repeat(" ", 85) + greenStyle.Render("│"))
-	b.WriteString("\n")
-	b.WriteString(greenStyle.Render("│") + normalStyle.Render(" Other:") + strings.Repeat(" ", 77) + greenStyle.Render("│"))
-	b.WriteString("\n")
-	b.WriteString(greenStyle.Render("│") + normalStyle.Render("   F1       - Toggle help") + strings.Repeat(" ", 58) + greenStyle.Render("│"))
-	b.WriteString("\n")
-	b.WriteString(greenStyle.Render("│") + normalStyle.Render("   q/Ctrl+C - Quit application") + strings.Repeat(" ", 53) + greenStyle.Render("│"))
-	b.WriteString("\n")
-	b.WriteString(greenStyle.Render("│") + strings.Repeat(" ", 85) + greenStyle.Render("│"))
-	b.WriteString("\n")
-	b.WriteString(greenStyle.Render("│") + cyanStyle.Render(" Auto-refreshes every 5 seconds | Press F1 to return") + strings.Repeat(" ", 32) + greenStyle.Render("│"))
-	b.WriteString("\n")
-	b.WriteString(greenStyle.Render("└─────────────────────────────────────────────────────────────────────────────────────┘"))
+	renderLine(" Navigation:", normalStyle)
+	renderLine("   ↑/k      - Move selection up (auto-scrolls)", normalStyle)
+	renderLine("   ↓/j      - Move selection down (auto-scrolls)", normalStyle)
+	renderLine("   ←/→ or h/l - Switch tabs", normalStyle)
+	renderLine("   1-4 or ^D/^I/^V/^N - Jump to specific tab", normalStyle)
+	renderLine("", normalStyle)
+	renderLine(" Container Actions:", normalStyle)
+	renderLine("   s        - Start/Stop selected container", normalStyle)
+	renderLine("   r        - Restart selected container", normalStyle)
+	renderLine("   c        - Open console (interactive shell, altscreen)", normalStyle)
+	renderLine("   d        - Toggle console mode (exec ↔ debug)", normalStyle)
+	renderLine("   o        - Open container port in browser", normalStyle)
+	renderLine("   l        - View container logs", normalStyle)
+	renderLine("   i        - Inspect (stats/image/mounts)", normalStyle)
+	renderLine("   Enter    - Refresh container list", normalStyle)
+	renderLine("   ESC      - Return from detail views", normalStyle)
+	renderLine("", normalStyle)
+	renderLine(" Other:", normalStyle)
+	renderLine("   F1       - Toggle help", normalStyle)
+	renderLine("   q/Ctrl+C - Quit application", normalStyle)
+	renderLine("", normalStyle)
+	renderLine(" Auto-refreshes every 5 seconds | Press F1 to return", cyanStyle)
+	b.WriteString(greenStyle.Render("└" + strings.Repeat("─", contentWidth) + "┘"))
 
 	return containerStyle.Render(b.String())
 }

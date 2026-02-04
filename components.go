@@ -37,20 +37,8 @@ func (h HeaderComponent) Update(msg tea.Msg) (HeaderComponent, tea.Cmd) {
 }
 
 func (h HeaderComponent) View() string {
-	var b strings.Builder
-
-	// Top border
-	b.WriteString(greenStyle.Render("┌" + strings.Repeat("─", h.width) + "┐"))
-	b.WriteString("\n")
-
-	// Header content
-	headerLeft := greenStyle.Render("│ " + h.title)
-	headerRight := greenStyle.Render(h.help + " │")
-	headerSpacing := strings.Repeat(" ", h.width-len(" "+h.title)-len(h.help+" │"))
-	b.WriteString(headerLeft + headerSpacing + headerRight)
-	b.WriteString("\n")
-
-	return b.String()
+	// Minimalistic: no header, just return empty
+	return ""
 }
 
 // TabsComponent renders the tab navigation
@@ -94,56 +82,81 @@ func (t TabsComponent) SetActiveTab(index int) TabsComponent {
 func (t TabsComponent) View() string {
 	var b strings.Builder
 
-	// Calculate tab widths
-	tabWidths := make([]int, len(t.tabs))
-	for i, tab := range t.tabs {
-		tabWidths[i] = 1 + len(tab.Name) + 1 + len(tab.Shortcut) + 1
-	}
+	borderColor := lipgloss.Color("#303030")
+	bgColor := lipgloss.Color("#0a0a0a")
+	activeColor := lipgloss.Color("#FFFFFF")
+	inactiveColor := lipgloss.Color("#666666")
 
-	// Top line with rounded corners
+	borderStyle := lipgloss.NewStyle().
+		Foreground(borderColor).
+		Background(bgColor)
+
+	// Top row with rounded corners
 	b.WriteString(" ")
-	for _, width := range tabWidths {
-		b.WriteString(greenStyle.Render("╭"))
-		b.WriteString(greenStyle.Render(strings.Repeat("─", width)))
-		b.WriteString(greenStyle.Render("╮"))
+	for _, tab := range t.tabs {
+		tabText := fmt.Sprintf(" %s ", tab.Name)
+		tabWidth := len(tabText)
+
+		// Top border with rounded corners
+		b.WriteString(borderStyle.Render("╭"))
+		b.WriteString(borderStyle.Render(strings.Repeat("─", tabWidth)))
+		b.WriteString(borderStyle.Render("╮"))
 	}
 	b.WriteString("\n")
 
-	// Tab labels
+	// Middle row with tab labels
 	b.WriteString(" ")
 	for i, tab := range t.tabs {
-		b.WriteString(greenStyle.Render("│"))
-		content := fmt.Sprintf(" %s %s ", tab.Name, tab.Shortcut)
+		tabText := fmt.Sprintf(" %s ", tab.Name)
+
+		// Left border
+		b.WriteString(borderStyle.Render("│"))
+
+		// Tab text
+		textStyle := lipgloss.NewStyle().
+			Foreground(inactiveColor).
+			Background(bgColor)
 		if i == t.activeTab {
-			b.WriteString(yellowStyle.Render(content))
-		} else {
-			b.WriteString(greenStyle.Render(content))
+			textStyle = lipgloss.NewStyle().
+				Foreground(activeColor).
+				Background(bgColor).
+				Bold(true)
 		}
-		b.WriteString(greenStyle.Render("│"))
+		b.WriteString(textStyle.Render(tabText))
+
+		// Right border
+		b.WriteString(borderStyle.Render("│"))
 	}
 	b.WriteString("\n")
 
-	// Bottom line
-	b.WriteString(greenStyle.Render("─"))
-	for i, width := range tabWidths {
+	// Bottom row with connecting line
+	b.WriteString(borderStyle.Render("─"))
+	for i, tab := range t.tabs {
+		tabText := fmt.Sprintf(" %s ", tab.Name)
+		tabWidth := len(tabText)
+
 		if i == t.activeTab {
-			b.WriteString(greenStyle.Render("╯"))
-			b.WriteString(strings.Repeat(" ", width))
-			b.WriteString(greenStyle.Render("╰"))
+			// Active tab: no bottom border (open to content)
+			b.WriteString(borderStyle.Render("╯"))
+			b.WriteString(strings.Repeat(" ", tabWidth))
+			b.WriteString(borderStyle.Render("╰"))
 		} else {
-			b.WriteString(greenStyle.Render("┴"))
-			b.WriteString(greenStyle.Render(strings.Repeat("─", width)))
-			b.WriteString(greenStyle.Render("┴"))
+			// Inactive tab: bottom border connects to line
+			b.WriteString(borderStyle.Render("┴"))
+			b.WriteString(borderStyle.Render(strings.Repeat("─", tabWidth)))
+			b.WriteString(borderStyle.Render("┴"))
 		}
 	}
 
-	// Extend line to edge
-	totalTabWidth := 1
-	for _, width := range tabWidths {
-		totalTabWidth += width + 2
+	// Calculate remaining width for the horizontal line
+	totalTabWidth := 1 // Initial left padding
+	for _, tab := range t.tabs {
+		totalTabWidth += len(fmt.Sprintf(" %s ", tab.Name)) + 2 // +2 for borders
 	}
 	remaining := t.width - totalTabWidth
-	b.WriteString(greenStyle.Render(strings.Repeat("─", remaining)))
+	if remaining > 0 {
+		b.WriteString(borderStyle.Render(strings.Repeat("─", remaining)))
+	}
 	b.WriteString("\n")
 
 	return b.String()
@@ -184,10 +197,8 @@ func (s StatusLineComponent) SetScrollIndicator(indicator string) StatusLineComp
 }
 
 func (s StatusLineComponent) View() string {
-	statusText := fmt.Sprintf(" %s (%d total)%s", s.label, s.count, s.scrollIndicator)
-	statusLine := greenStyle.Render("│") + cyanStyle.Render(statusText)
-	statusSpacing := strings.Repeat(" ", s.width-len(statusText))
-	return statusLine + statusSpacing + greenStyle.Render("│") + "\n"
+	// Minimalistic: no status line, or very subtle
+	return ""
 }
 
 // TableComponent renders a table with headers and rows
@@ -200,8 +211,9 @@ type TableComponent struct {
 }
 
 type TableHeader struct {
-	Label string
-	Width int
+	Label     string
+	Width     int
+	AlignRight bool // Right-align for numbers, left-align for text
 }
 
 type TableRow struct {
@@ -245,77 +257,90 @@ func (t TableComponent) SetVisibleRange(start, end int) TableComponent {
 func (t TableComponent) View() string {
 	var b strings.Builder
 
-	// Table divider
-	divider := "├"
-	for i, header := range t.headers {
-		divider += strings.Repeat("─", header.Width)
-		if i < len(t.headers)-1 {
-			divider += "┼"
-		}
-	}
-	divider += "┤"
-	b.WriteString(greenStyle.Render(divider))
-	b.WriteString("\n")
+	headerStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#999999")).
+		Background(lipgloss.Color("#0a0a0a")).
+		Bold(true)
+
+	normalCellStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#666666")).
+		Background(lipgloss.Color("#0a0a0a"))
+
+	selectedCellStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#FFFFFF")).
+		Background(lipgloss.Color("#0a0a0a"))
+
+	lineStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#303030")).
+		Background(lipgloss.Color("#0a0a0a"))
 
 	// Table headers
-	b.WriteString(greenStyle.Render("│"))
-	for _, header := range t.headers {
-		b.WriteString(normalStyle.Render(padCenter(header.Label, header.Width)))
-		b.WriteString(greenStyle.Render("│"))
+	for j, header := range t.headers {
+		var headerText string
+		if header.AlignRight {
+			headerText = padLeft(header.Label, header.Width)
+		} else {
+			headerText = padRight(header.Label, header.Width)
+		}
+		b.WriteString(headerStyle.Render(headerText))
+		if j < len(t.headers)-1 {
+			b.WriteString(normalCellStyle.Render("  "))
+		}
 	}
 	b.WriteString("\n")
 
-	// Header bottom divider
-	headerDivider := "├"
-	for i, header := range t.headers {
-		headerDivider += strings.Repeat("─", header.Width)
-		if i < len(t.headers)-1 {
-			headerDivider += "┼"
-		}
+	// Header bottom line
+	totalWidth := 0
+	for _, header := range t.headers {
+		totalWidth += header.Width
 	}
-	headerDivider += "┤"
-	b.WriteString(greenStyle.Render(headerDivider))
+	totalWidth += (len(t.headers) - 1) * 2 // Add spacing between columns
+	b.WriteString(lineStyle.Render(strings.Repeat("─", totalWidth)))
 	b.WriteString("\n")
 
 	// Table rows
 	if len(t.rows) == 0 {
-		b.WriteString(greenStyle.Render("│"))
 		emptyMsg := " No items found"
-		b.WriteString(cyanStyle.Render(emptyMsg))
-		b.WriteString(strings.Repeat(" ", t.width-len(emptyMsg)))
-		b.WriteString(greenStyle.Render("│"))
+		emptyStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#444444")).
+			Background(lipgloss.Color("#0a0a0a"))
+		b.WriteString(emptyStyle.Render(emptyMsg))
 		b.WriteString("\n")
 	} else {
 		for i := t.start; i < t.end && i < len(t.rows); i++ {
 			row := t.rows[i]
-			b.WriteString(greenStyle.Render("│"))
 
 			for j, cell := range row.Cells {
 				if j < len(t.headers) {
-					cellText := padRight(cell, t.headers[j].Width)
-					if row.IsSelected {
-						b.WriteString(yellowStyle.Render(cellText))
+					// Second column (index 1) is the status dot - render as-is without styling
+					if j == 1 && strings.Contains(cell, "●") {
+						b.WriteString(cell)
+						if t.headers[j].Width > 1 {
+							b.WriteString(normalCellStyle.Render(strings.Repeat(" ", t.headers[j].Width-1)))
+						}
 					} else {
-						b.WriteString(row.Style.Render(cellText))
+						// Apply alignment based on header
+						var cellText string
+						if t.headers[j].AlignRight {
+							cellText = padLeft(cell, t.headers[j].Width)
+						} else {
+							cellText = padRight(cell, t.headers[j].Width)
+						}
+
+						if row.IsSelected {
+							b.WriteString(selectedCellStyle.Render(cellText))
+						} else {
+							b.WriteString(normalCellStyle.Render(cellText))
+						}
 					}
-					b.WriteString(greenStyle.Render("│"))
+					if j < len(t.headers)-1 {
+						b.WriteString(normalCellStyle.Render("  "))
+					}
 				}
 			}
 			b.WriteString("\n")
 		}
 	}
-
-	// Table bottom border
-	bottomDivider := "├"
-	for i, header := range t.headers {
-		bottomDivider += strings.Repeat("─", header.Width)
-		if i < len(t.headers)-1 {
-			bottomDivider += "┴"
-		}
-	}
-	bottomDivider += "┤"
-	b.WriteString(greenStyle.Render(bottomDivider))
-	b.WriteString("\n")
 
 	return b.String()
 }
@@ -359,34 +384,45 @@ func (a ActionBarComponent) SetStatusMessage(message string) ActionBarComponent 
 func (a ActionBarComponent) View() string {
 	var b strings.Builder
 
-	b.WriteString(greenStyle.Render("│"))
+	lineStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#303030")).
+		Background(lipgloss.Color("#0a0a0a"))
 
+	actionStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#666666")).
+		Background(lipgloss.Color("#0a0a0a"))
+
+	statusStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#00FFFF")).
+		Background(lipgloss.Color("#0a0a0a"))
+
+	errorStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#FF0000")).
+		Background(lipgloss.Color("#0a0a0a"))
+
+	// Top line
+	b.WriteString(lineStyle.Render(strings.Repeat("─", a.width)))
+	b.WriteString("\n")
+
+	// Action bar content
 	if a.statusMessage != "" {
-		statusStyle := cyanStyle
+		style := statusStyle
 		if strings.HasPrefix(a.statusMessage, "ERROR:") {
-			statusStyle = redStyle
+			style = errorStyle
 		}
-		msg := " " + a.statusMessage
+		msg := a.statusMessage
 		if len(msg) > a.width-2 {
 			msg = msg[:a.width-5] + "..."
 		}
-		b.WriteString(statusStyle.Render(msg))
-		b.WriteString(strings.Repeat(" ", a.width-len(msg)))
+		b.WriteString(style.Render(msg))
 	} else if a.actions != "" {
-		if len(a.actions) > a.width-2 {
-			a.actions = a.actions[:a.width-5] + "..."
+		msg := a.actions
+		if len(msg) > a.width-2 {
+			msg = msg[:a.width-5] + "..."
 		}
-		b.WriteString(cyanStyle.Render(a.actions))
-		b.WriteString(strings.Repeat(" ", a.width-len(a.actions)))
-	} else {
-		b.WriteString(strings.Repeat(" ", a.width))
+		b.WriteString(actionStyle.Render(msg))
 	}
-
-	b.WriteString(greenStyle.Render("│"))
 	b.WriteString("\n")
-
-	// Bottom border
-	b.WriteString(greenStyle.Render("└" + strings.Repeat("─", a.width) + "┘"))
 
 	return b.String()
 }
@@ -434,30 +470,44 @@ func (d DetailViewComponent) SetScroll(scroll int) DetailViewComponent {
 func (d DetailViewComponent) View() string {
 	var b strings.Builder
 
-	// Top border
-	b.WriteString(greenStyle.Render("┌" + strings.Repeat("─", d.width) + "┐"))
-	b.WriteString("\n")
+	titleStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#FFFFFF")).
+		Background(lipgloss.Color("#0a0a0a")).
+		Bold(true)
+
+	helpStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#666666")).
+		Background(lipgloss.Color("#0a0a0a"))
+
+	lineStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#303030")).
+		Background(lipgloss.Color("#0a0a0a"))
+
+	contentStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#666666")).
+		Background(lipgloss.Color("#0a0a0a"))
+
+	loadingStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#444444")).
+		Background(lipgloss.Color("#0a0a0a"))
 
 	// Header
-	headerText := fmt.Sprintf("│ %s", d.title)
-	headerRight := "[ESC] Back │"
-	headerSpacing := strings.Repeat(" ", d.width-len(d.title)-len(headerRight))
-	b.WriteString(greenStyle.Render(headerText))
-	b.WriteString(headerSpacing)
-	b.WriteString(greenStyle.Render(headerRight))
+	headerText := d.title
+	headerRight := "[ESC] Back"
+	headerSpacing := strings.Repeat(" ", d.width-len(headerText)-len(headerRight))
+	b.WriteString(titleStyle.Render(headerText))
+	b.WriteString(strings.Repeat(" ", len(headerSpacing)))
+	b.WriteString(helpStyle.Render(headerRight))
 	b.WriteString("\n")
 
 	// Content divider
-	b.WriteString(greenStyle.Render("├" + strings.Repeat("─", d.width) + "┤"))
+	b.WriteString(lineStyle.Render(strings.Repeat("─", d.width)))
 	b.WriteString("\n")
 
 	// Content
 	if d.content == "" {
-		b.WriteString(greenStyle.Render("│"))
 		loadingMsg := " Loading..."
-		b.WriteString(cyanStyle.Render(loadingMsg))
-		b.WriteString(strings.Repeat(" ", d.width-len(loadingMsg)))
-		b.WriteString(greenStyle.Render("│"))
+		b.WriteString(loadingStyle.Render(loadingMsg))
 		b.WriteString("\n")
 	} else {
 		lines := strings.Split(d.content, "\n")
@@ -469,28 +519,19 @@ func (d DetailViewComponent) View() string {
 		for i := d.scroll; i < end; i++ {
 			if i < len(lines) {
 				line := lines[i]
-				if len(line) > d.width-2 {
-					line = line[:d.width-5] + "..."
+				if len(line) > d.width {
+					line = line[:d.width-3] + "..."
 				}
-				b.WriteString(greenStyle.Render("│"))
-				b.WriteString(normalStyle.Render(line))
-				b.WriteString(strings.Repeat(" ", d.width-len(line)))
-				b.WriteString(greenStyle.Render("│"))
+				b.WriteString(contentStyle.Render(line))
 				b.WriteString("\n")
 			}
 		}
 
 		// Fill remaining lines
 		for i := end - d.scroll; i < d.lines; i++ {
-			b.WriteString(greenStyle.Render("│"))
-			b.WriteString(strings.Repeat(" ", d.width))
-			b.WriteString(greenStyle.Render("│"))
 			b.WriteString("\n")
 		}
 	}
-
-	// Bottom border
-	b.WriteString(greenStyle.Render("└" + strings.Repeat("─", d.width) + "┘"))
 
 	return b.String()
 }

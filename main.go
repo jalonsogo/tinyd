@@ -171,6 +171,10 @@ type model struct {
 	runEnvValue       string
 	runModalField     int // Track which field is being edited
 
+	// Delete confirmation
+	selectedVolume *Volume
+	selectedNetwork *Network
+
 	// Components
 	header     HeaderComponent
 	tabs       TabsComponent
@@ -1075,6 +1079,23 @@ func inspectContainer(cli *client.Client, containerID string) tea.Cmd {
 	}
 }
 
+// Delete container
+func deleteContainer(cli *client.Client, containerID, containerName string) tea.Cmd {
+	return func() tea.Msg {
+		if cli == nil {
+			return errMsg(fmt.Errorf("docker client not initialized"))
+		}
+
+		ctx := context.Background()
+		_, err := cli.ContainerRemove(ctx, containerID, client.ContainerRemoveOptions{Force: true, RemoveVolumes: false})
+		if err != nil {
+			return actionErrorMsg(fmt.Sprintf("Failed to delete container: %v", err))
+		}
+
+		return actionSuccessMsg(fmt.Sprintf("Container %s deleted", containerName))
+	}
+}
+
 // Delete image
 func deleteImage(cli *client.Client, imageID string) tea.Cmd {
 	return func() tea.Msg {
@@ -1089,6 +1110,40 @@ func deleteImage(cli *client.Client, imageID string) tea.Cmd {
 		}
 
 		return actionSuccessMsg("Image deleted successfully")
+	}
+}
+
+// Delete volume
+func deleteVolume(cli *client.Client, volumeName string) tea.Cmd {
+	return func() tea.Msg {
+		if cli == nil {
+			return errMsg(fmt.Errorf("docker client not initialized"))
+		}
+
+		ctx := context.Background()
+		_, err := cli.VolumeRemove(ctx, volumeName, client.VolumeRemoveOptions{Force: true})
+		if err != nil {
+			return actionErrorMsg(fmt.Sprintf("Failed to delete volume: %v", err))
+		}
+
+		return actionSuccessMsg(fmt.Sprintf("Volume %s deleted", volumeName))
+	}
+}
+
+// Delete network
+func deleteNetwork(cli *client.Client, networkID string) tea.Cmd {
+	return func() tea.Msg {
+		if cli == nil {
+			return errMsg(fmt.Errorf("docker client not initialized"))
+		}
+
+		ctx := context.Background()
+		_, err := cli.NetworkRemove(ctx, networkID, client.NetworkRemoveOptions{})
+		if err != nil {
+			return actionErrorMsg(fmt.Sprintf("Failed to delete network: %v", err))
+		}
+
+		return actionSuccessMsg("Network deleted successfully")
 	}
 }
 
@@ -1414,14 +1469,38 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.runModalField = 0
 				}
 			}
-		case "d":
-			// Delete image (Images tab only)
-			if m.activeTab == 1 && m.currentView == viewModeList {
-				filteredImages := filterImages(m.images, m.containers, m.imageFilter)
-				if len(filteredImages) > 0 && m.selectedRow < len(filteredImages) {
-					selectedImage := filteredImages[m.selectedRow]
-					m.selectedImage = &selectedImage
-					m.currentView = viewModeDeleteConfirm
+		case "D":
+			// Delete selected resource (works on all tabs)
+			if m.currentView == viewModeList {
+				switch m.activeTab {
+				case 0: // Containers
+					filteredContainers := filterContainers(m.containers, m.containerFilter)
+					if len(filteredContainers) > 0 && m.selectedRow < len(filteredContainers) {
+						selectedContainer := filteredContainers[m.selectedRow]
+						m.selectedContainer = &selectedContainer
+						m.currentView = viewModeDeleteConfirm
+					}
+				case 1: // Images
+					filteredImages := filterImages(m.images, m.containers, m.imageFilter)
+					if len(filteredImages) > 0 && m.selectedRow < len(filteredImages) {
+						selectedImage := filteredImages[m.selectedRow]
+						m.selectedImage = &selectedImage
+						m.currentView = viewModeDeleteConfirm
+					}
+				case 2: // Volumes
+					filteredVolumes := filterVolumes(m.volumes, m.containers, m.dockerClient)
+					if len(filteredVolumes) > 0 && m.selectedRow < len(filteredVolumes) {
+						selectedVolume := filteredVolumes[m.selectedRow]
+						m.selectedVolume = &selectedVolume
+						m.currentView = viewModeDeleteConfirm
+					}
+				case 3: // Networks
+					filteredNetworks := filterNetworks(m.networks, m.containers, m.dockerClient)
+					if len(filteredNetworks) > 0 && m.selectedRow < len(filteredNetworks) {
+						selectedNetwork := filteredNetworks[m.selectedRow]
+						m.selectedNetwork = &selectedNetwork
+						m.currentView = viewModeDeleteConfirm
+					}
 				}
 			}
 		case "p":
@@ -1437,18 +1516,30 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.currentView = viewModeList
 				m.selectedContainer = nil
 				m.selectedImage = nil
+				m.selectedVolume = nil
+				m.selectedNetwork = nil
 				m.logsContent = ""
 				m.inspectContent = ""
 				m.availablePorts = nil
 			}
 		case "enter":
-			// In delete confirmation modal, execute delete
+			// In delete confirmation modal, execute delete based on resource type
 			if m.currentView == viewModeDeleteConfirm {
-				if m.selectedImage != nil {
-					m.currentView = viewModeList
-					m.actionInProgress = true
+				m.currentView = viewModeList
+				m.actionInProgress = true
+
+				if m.selectedContainer != nil {
+					m.statusMessage = fmt.Sprintf("Deleting container %s...", m.selectedContainer.Name)
+					return m, deleteContainer(m.dockerClient, m.selectedContainer.ID, m.selectedContainer.Name)
+				} else if m.selectedImage != nil {
 					m.statusMessage = fmt.Sprintf("Deleting image %s:%s...", m.selectedImage.Repository, m.selectedImage.Tag)
 					return m, deleteImage(m.dockerClient, m.selectedImage.ID)
+				} else if m.selectedVolume != nil {
+					m.statusMessage = fmt.Sprintf("Deleting volume %s...", m.selectedVolume.Name)
+					return m, deleteVolume(m.dockerClient, m.selectedVolume.Name)
+				} else if m.selectedNetwork != nil {
+					m.statusMessage = fmt.Sprintf("Deleting network %s...", m.selectedNetwork.Name)
+					return m, deleteNetwork(m.dockerClient, m.selectedNetwork.ID)
 				}
 			}
 
@@ -2030,7 +2121,7 @@ func (m model) renderContainers() string {
 		if selectedContainer.Ports != "" && selectedContainer.Ports != "--" {
 			actions += " | " + renderShortcut("Open")
 		}
-		actions += " | " + renderShortcut("Logs") + " | " + renderShortcut("Inspect")
+		actions += " | " + renderShortcut("Logs") + " | " + renderShortcut("Inspect") + " | " + renderShortcut("Delete")
 		m.actionBar = m.actionBar.SetActions(actions)
 	} else {
 		m.actionBar = m.actionBar.SetActions("")
@@ -2316,7 +2407,12 @@ func (m model) renderVolumes() string {
 
 	// Action bar component with responsive width
 	m.actionBar = m.actionBar.SetStatusMessage(m.statusMessage)
-	m.actionBar = m.actionBar.SetActions("")
+	if m.statusMessage == "" && len(filteredVolumes) > 0 {
+		actions := " " + renderShortcut("Delete") + " | " + renderShortcut("Filter")
+		m.actionBar = m.actionBar.SetActions(actions)
+	} else {
+		m.actionBar = m.actionBar.SetActions("")
+	}
 	actionBar := m.actionBar.WithWidth(width)
 	b.WriteString(actionBar.View())
 
@@ -2458,7 +2554,12 @@ func (m model) renderNetworks() string {
 
 	// Action bar component with responsive width
 	m.actionBar = m.actionBar.SetStatusMessage(m.statusMessage)
-	m.actionBar = m.actionBar.SetActions("")
+	if m.statusMessage == "" && len(filteredNetworks) > 0 {
+		actions := " " + renderShortcut("Delete") + " | " + renderShortcut("Filter")
+		m.actionBar = m.actionBar.SetActions(actions)
+	} else {
+		m.actionBar = m.actionBar.SetActions("")
+	}
 	actionBar := m.actionBar.WithWidth(width)
 	b.WriteString(actionBar.View())
 
@@ -2891,12 +2992,33 @@ func (m model) renderDeleteConfirm() string {
 		height = 20
 	}
 
-	// Render base view (images list)
-	baseView := m.renderImages()
+	// Render base view based on active tab
+	var baseView string
+	switch m.activeTab {
+	case 0:
+		baseView = m.renderContainers()
+	case 1:
+		baseView = m.renderImages()
+	case 2:
+		baseView = m.renderVolumes()
+	case 3:
+		baseView = m.renderNetworks()
+	}
 
-	imageName := "Image"
-	if m.selectedImage != nil {
-		imageName = m.selectedImage.Repository + ":" + m.selectedImage.Tag
+	// Determine resource type and name
+	var resourceType, resourceName string
+	if m.selectedContainer != nil {
+		resourceType = "Container"
+		resourceName = m.selectedContainer.Name
+	} else if m.selectedImage != nil {
+		resourceType = "Image"
+		resourceName = m.selectedImage.Repository + ":" + m.selectedImage.Tag
+	} else if m.selectedVolume != nil {
+		resourceType = "Volume"
+		resourceName = m.selectedVolume.Name
+	} else if m.selectedNetwork != nil {
+		resourceType = "Network"
+		resourceName = m.selectedNetwork.Name
 	}
 
 	// Dim the base view
@@ -2931,7 +3053,7 @@ func (m model) renderDeleteConfirm() string {
 	modalContent.WriteString(borderStyle.Render("╭" + strings.Repeat("─", innerWidth+2) + "╮") + "\n")
 
 	// Title
-	title := " Delete Image "
+	title := " Delete " + resourceType + " "
 	padding := strings.Repeat(" ", innerWidth+2-len(title))
 	modalContent.WriteString(borderStyle.Render("│") + textStyle.Render(title) + padding + borderStyle.Render("│") + "\n")
 
@@ -2949,13 +3071,13 @@ func (m model) renderDeleteConfirm() string {
 	// Empty line
 	modalContent.WriteString(borderStyle.Render("│") + strings.Repeat(" ", innerWidth+2) + borderStyle.Render("│") + "\n")
 
-	// Image name
-	imageText := " Image: " + imageName
-	if len(imageText) > innerWidth {
-		imageText = imageText[:innerWidth-3] + "..."
+	// Resource name
+	resourceText := " " + resourceType + ": " + resourceName
+	if len(resourceText) > innerWidth {
+		resourceText = resourceText[:innerWidth-3] + "..."
 	}
-	imgPadding := strings.Repeat(" ", innerWidth+2-len(imageText))
-	modalContent.WriteString(borderStyle.Render("│") + subStyle.Render(imageText) + imgPadding + borderStyle.Render("│") + "\n")
+	resourcePadding := strings.Repeat(" ", innerWidth+2-len(resourceText))
+	modalContent.WriteString(borderStyle.Render("│") + subStyle.Render(resourceText) + resourcePadding + borderStyle.Render("│") + "\n")
 
 	// Empty line
 	modalContent.WriteString(borderStyle.Render("│") + strings.Repeat(" ", innerWidth+2) + borderStyle.Render("│") + "\n")

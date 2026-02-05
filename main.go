@@ -252,6 +252,7 @@ var (
 	white      = lipgloss.Color("#FFFFFF")
 	grayText   = lipgloss.Color("#666666")
 	darkGray   = lipgloss.Color("#444444")
+	dimOverlay = lipgloss.Color("#333333")
 	lightGray  = lipgloss.Color("#999999")
 )
 
@@ -2589,6 +2590,87 @@ func (m model) addFilterIndicator(tabsView string, filterName string, width int)
 	return strings.Join(lines, "\n")
 }
 
+// overlayModal renders a modal centered on top of a base view with dimmed background
+func overlayModal(baseView string, modalContent string, width, height, modalWidth int) string {
+	dimBg := lipgloss.NewStyle().
+		Foreground(dimOverlay).
+		Background(bgColor)
+
+	modalLines := strings.Split(modalContent, "\n")
+	baseLines := strings.Split(baseView, "\n")
+
+	// Calculate modal position
+	modalHeight := len(modalLines)
+	topPadding := (height - modalHeight) / 2
+	if topPadding < 0 {
+		topPadding = 0
+	}
+	leftPadding := (width - modalWidth) / 2
+	if leftPadding < 0 {
+		leftPadding = 0
+	}
+
+	var result strings.Builder
+	for i := 0; i < height; i++ {
+		if i >= topPadding && i < topPadding+modalHeight {
+			// Modal row - render dimmed base, then overlay modal
+			modalLineIdx := i - topPadding
+			if modalLineIdx < len(modalLines) {
+				// Build the line with dimmed background and modal overlay
+				var line strings.Builder
+
+				// Left dimmed area
+				if leftPadding > 0 {
+					if i < len(baseLines) && len(baseLines[i]) > 0 {
+						// Dim the left part of base line
+						leftPart := baseLines[i]
+						if len(leftPart) > leftPadding {
+							leftPart = leftPart[:leftPadding]
+						}
+						line.WriteString(dimBg.Render(stripAnsiCodes(leftPart)))
+					} else {
+						line.WriteString(dimBg.Render(strings.Repeat(" ", leftPadding)))
+					}
+				}
+
+				// Modal content (not dimmed)
+				line.WriteString(modalLines[modalLineIdx])
+
+				// Right dimmed area
+				rightStart := leftPadding + len(stripAnsiCodes(modalLines[modalLineIdx]))
+				if rightStart < width {
+					rightPart := ""
+					if i < len(baseLines) && len(baseLines[i]) > rightStart {
+						rightPart = baseLines[i][rightStart:]
+					}
+					if len(rightPart) > 0 {
+						line.WriteString(dimBg.Render(stripAnsiCodes(rightPart)))
+					} else {
+						line.WriteString(dimBg.Render(strings.Repeat(" ", width-rightStart)))
+					}
+				}
+
+				result.WriteString(line.String())
+			} else {
+				// Shouldn't happen, but fallback
+				if i < len(baseLines) {
+					result.WriteString(dimBg.Render(stripAnsiCodes(baseLines[i])))
+				}
+			}
+		} else {
+			// Non-modal row - render dimmed base
+			if i < len(baseLines) {
+				result.WriteString(dimBg.Render(stripAnsiCodes(baseLines[i])))
+			} else {
+				result.WriteString(dimBg.Render(strings.Repeat(" ", width)))
+			}
+		}
+		result.WriteString("\n")
+	}
+
+	return result.String()
+}
+
 // Render keyboard shortcut with underscored first letter in white
 func renderShortcut(key string) string {
 	if len(key) == 0 {
@@ -3849,12 +3931,6 @@ func (m model) renderPullImageModal() string {
 	// Render base view (images list)
 	baseView := m.renderImages()
 
-	// Dim the base view
-	dimStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#666666"))
-
-	dimmedBase := dimStyle.Render(baseView)
-
 	// Modal dimensions
 	modalWidth := 60
 	if modalWidth > width-10 {
@@ -3865,14 +3941,15 @@ func (m model) renderPullImageModal() string {
 	var modalContent strings.Builder
 
 	borderColor := lipgloss.Color("#666666")
+	modalBg := lipgloss.Color("#0a0a0a")
 	textColor := lipgloss.Color("#CCCCCC")
 	labelColor := lipgloss.Color("#999999")
 	inputColor := lipgloss.Color("#FFFFFF")
 
-	borderStyle := lipgloss.NewStyle().Foreground(borderColor)
-	textStyle := lipgloss.NewStyle().Foreground(textColor)
-	labelStyle := lipgloss.NewStyle().Foreground(labelColor)
-	inputStyle := lipgloss.NewStyle().Foreground(inputColor)
+	borderStyle := lipgloss.NewStyle().Foreground(borderColor).Background(modalBg)
+	textStyle := lipgloss.NewStyle().Foreground(textColor).Background(modalBg)
+	labelStyle := lipgloss.NewStyle().Foreground(labelColor).Background(modalBg)
+	inputStyle := lipgloss.NewStyle().Foreground(inputColor).Background(modalBg)
 
 	// Calculate inner width
 	innerWidth := modalWidth - 4
@@ -3883,101 +3960,56 @@ func (m model) renderPullImageModal() string {
 	// Title
 	title := " Pull Docker Image "
 	titlePadding := (innerWidth + 2 - len(title)) / 2
-	modalContent.WriteString(borderStyle.Render("│") + strings.Repeat(" ", titlePadding) +
-		textStyle.Render(title) + strings.Repeat(" ", innerWidth+2-titlePadding-len(title)) +
+	modalContent.WriteString(borderStyle.Render("│") + textStyle.Render(strings.Repeat(" ", titlePadding)) +
+		textStyle.Render(title) + textStyle.Render(strings.Repeat(" ", innerWidth+2-titlePadding-len(title))) +
 		borderStyle.Render("│") + "\n")
 
 	// Separator
 	modalContent.WriteString(borderStyle.Render("├" + strings.Repeat("─", innerWidth+2) + "┤") + "\n")
 
 	// Empty line
-	modalContent.WriteString(borderStyle.Render("│") + strings.Repeat(" ", innerWidth+2) + borderStyle.Render("│") + "\n")
+	modalContent.WriteString(borderStyle.Render("│") + textStyle.Render(strings.Repeat(" ", innerWidth+2)) + borderStyle.Render("│") + "\n")
 
 	// Image name field label
 	label := "  Image Name:"
-	modalContent.WriteString(borderStyle.Render("│") + " " + labelStyle.Render(label) +
-		strings.Repeat(" ", innerWidth+1-len(label)) + borderStyle.Render("│") + "\n")
+	modalContent.WriteString(borderStyle.Render("│") + textStyle.Render(" ") + labelStyle.Render(label) +
+		textStyle.Render(strings.Repeat(" ", innerWidth+1-len(label))) + borderStyle.Render("│") + "\n")
 
 	// Image name input field
 	inputValue := m.pullImageName + "█" // Cursor
 	if len(inputValue) > innerWidth-4 {
 		inputValue = inputValue[:innerWidth-4]
 	}
-	modalContent.WriteString(borderStyle.Render("│") + "  " + inputStyle.Render(inputValue) +
-		strings.Repeat(" ", innerWidth-len(inputValue)) + borderStyle.Render("│") + "\n")
+	modalContent.WriteString(borderStyle.Render("│") + textStyle.Render("  ") + inputStyle.Render(inputValue) +
+		textStyle.Render(strings.Repeat(" ", innerWidth-len(inputValue))) + borderStyle.Render("│") + "\n")
 
 	// Empty line
-	modalContent.WriteString(borderStyle.Render("│") + strings.Repeat(" ", innerWidth+2) + borderStyle.Render("│") + "\n")
+	modalContent.WriteString(borderStyle.Render("│") + textStyle.Render(strings.Repeat(" ", innerWidth+2)) + borderStyle.Render("│") + "\n")
 
 	// Help text
 	helpText := "  Examples: nginx:latest, postgres:15, node:18-alpine"
 	if len(helpText) > innerWidth+2 {
 		helpText = helpText[:innerWidth-1] + "..."
 	}
-	modalContent.WriteString(borderStyle.Render("│") + " " + labelStyle.Render(helpText) +
-		strings.Repeat(" ", innerWidth+1-len(helpText)) + borderStyle.Render("│") + "\n")
+	modalContent.WriteString(borderStyle.Render("│") + textStyle.Render(" ") + labelStyle.Render(helpText) +
+		textStyle.Render(strings.Repeat(" ", innerWidth+1-len(helpText))) + borderStyle.Render("│") + "\n")
 
 	// Empty line
-	modalContent.WriteString(borderStyle.Render("│") + strings.Repeat(" ", innerWidth+2) + borderStyle.Render("│") + "\n")
+	modalContent.WriteString(borderStyle.Render("│") + textStyle.Render(strings.Repeat(" ", innerWidth+2)) + borderStyle.Render("│") + "\n")
 
 	// Bottom border with controls
 	modalContent.WriteString(borderStyle.Render("├" + strings.Repeat("─", innerWidth+2) + "┤") + "\n")
 
 	// Controls
 	controls := "  [Enter] Pull   [ESC] Cancel"
-	modalContent.WriteString(borderStyle.Render("│") + " " + labelStyle.Render(controls) +
-		strings.Repeat(" ", innerWidth+1-len(controls)) + borderStyle.Render("│") + "\n")
+	modalContent.WriteString(borderStyle.Render("│") + textStyle.Render(" ") + labelStyle.Render(controls) +
+		textStyle.Render(strings.Repeat(" ", innerWidth+1-len(controls))) + borderStyle.Render("│") + "\n")
 
 	// Bottom border
 	modalContent.WriteString(borderStyle.Render("╰" + strings.Repeat("─", innerWidth+2) + "╯") + "\n")
 
-	// Split into lines
-	modalLines := strings.Split(modalContent.String(), "\n")
-
-	// Calculate vertical position (center)
-	modalHeight := len(modalLines)
-	topPadding := (height - modalHeight) / 2
-	if topPadding < 0 {
-		topPadding = 0
-	}
-
-	// Overlay modal on dimmed base
-	baseLines := strings.Split(dimmedBase, "\n")
-	var result strings.Builder
-
-	for i := 0; i < height; i++ {
-		if i >= topPadding && i < topPadding+modalHeight {
-			modalLineIdx := i - topPadding
-			if modalLineIdx < len(modalLines) {
-				// Overlay modal on the base line
-				leftPadding := (width - modalWidth) / 2
-				if leftPadding < 0 {
-					leftPadding = 0
-				}
-
-				if i < len(baseLines) {
-					baseLine := baseLines[i]
-					// Simply place modal at the calculated position, background is already dimmed
-					if leftPadding > 0 && len(baseLine) > leftPadding {
-						result.WriteString(baseLine[:leftPadding] + modalLines[modalLineIdx])
-					} else {
-						result.WriteString(strings.Repeat(" ", leftPadding) + modalLines[modalLineIdx])
-					}
-				} else {
-					result.WriteString(strings.Repeat(" ", leftPadding) + modalLines[modalLineIdx])
-				}
-			} else {
-				if i < len(baseLines) {
-					result.WriteString(baseLines[i])
-				}
-			}
-		} else if i < len(baseLines) {
-			result.WriteString(baseLines[i])
-		}
-		result.WriteString("\n")
-	}
-
-	return result.String()
+	// Use overlay helper to render modal on dimmed background
+	return overlayModal(baseView, modalContent.String(), width, height, modalWidth)
 }
 
 func (m model) renderSearchModal() string {
@@ -4004,12 +4036,6 @@ func (m model) renderSearchModal() string {
 		baseView = m.renderNetworks()
 	}
 
-	// Dim the base view
-	dimStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#666666"))
-
-	dimmedBase := dimStyle.Render(baseView)
-
 	// Modal dimensions - make it wide for search results
 	modalWidth := width - 20
 	if modalWidth > 100 {
@@ -4023,16 +4049,17 @@ func (m model) renderSearchModal() string {
 	var modalContent strings.Builder
 
 	borderColor := lipgloss.Color("#666666")
+	modalBg := lipgloss.Color("#0a0a0a")
 	textColor := lipgloss.Color("#CCCCCC")
 	labelColor := lipgloss.Color("#999999")
 	inputColor := lipgloss.Color("#FFFFFF")
 	selectedColor := lipgloss.Color("#00FF00")
 
-	borderStyle := lipgloss.NewStyle().Foreground(borderColor)
-	textStyle := lipgloss.NewStyle().Foreground(textColor)
-	labelStyle := lipgloss.NewStyle().Foreground(labelColor)
-	inputStyle := lipgloss.NewStyle().Foreground(inputColor)
-	selectedStyle := lipgloss.NewStyle().Foreground(selectedColor).Bold(true)
+	borderStyle := lipgloss.NewStyle().Foreground(borderColor).Background(modalBg)
+	textStyle := lipgloss.NewStyle().Foreground(textColor).Background(modalBg)
+	labelStyle := lipgloss.NewStyle().Foreground(labelColor).Background(modalBg)
+	inputStyle := lipgloss.NewStyle().Foreground(inputColor).Background(modalBg)
+	selectedStyle := lipgloss.NewStyle().Foreground(selectedColor).Background(modalBg).Bold(true)
 
 	// Calculate inner width
 	innerWidth := modalWidth - 4
@@ -4043,26 +4070,26 @@ func (m model) renderSearchModal() string {
 	// Title
 	title := " Global Search "
 	titlePadding := (innerWidth + 2 - len(title)) / 2
-	modalContent.WriteString(borderStyle.Render("│") + strings.Repeat(" ", titlePadding) +
-		textStyle.Render(title) + strings.Repeat(" ", innerWidth+2-titlePadding-len(title)) +
+	modalContent.WriteString(borderStyle.Render("│") + textStyle.Render(strings.Repeat(" ", titlePadding)) +
+		textStyle.Render(title) + textStyle.Render(strings.Repeat(" ", innerWidth+2-titlePadding-len(title))) +
 		borderStyle.Render("│") + "\n")
 
 	// Separator
 	modalContent.WriteString(borderStyle.Render("├" + strings.Repeat("─", innerWidth+2) + "┤") + "\n")
 
 	// Empty line
-	modalContent.WriteString(borderStyle.Render("│") + strings.Repeat(" ", innerWidth+2) + borderStyle.Render("│") + "\n")
+	modalContent.WriteString(borderStyle.Render("│") + textStyle.Render(strings.Repeat(" ", innerWidth+2)) + borderStyle.Render("│") + "\n")
 
 	// Search input field
 	inputValue := "/ " + m.searchQuery + "█" // Cursor
 	if len(inputValue) > innerWidth {
 		inputValue = inputValue[:innerWidth]
 	}
-	modalContent.WriteString(borderStyle.Render("│") + "  " + inputStyle.Render(inputValue) +
-		strings.Repeat(" ", innerWidth-len(inputValue)) + borderStyle.Render("│") + "\n")
+	modalContent.WriteString(borderStyle.Render("│") + textStyle.Render("  ") + inputStyle.Render(inputValue) +
+		textStyle.Render(strings.Repeat(" ", innerWidth-len(inputValue))) + borderStyle.Render("│") + "\n")
 
 	// Empty line
-	modalContent.WriteString(borderStyle.Render("│") + strings.Repeat(" ", innerWidth+2) + borderStyle.Render("│") + "\n")
+	modalContent.WriteString(borderStyle.Render("│") + textStyle.Render(strings.Repeat(" ", innerWidth+2)) + borderStyle.Render("│") + "\n")
 
 	// Results divider
 	modalContent.WriteString(borderStyle.Render("├" + strings.Repeat("─", innerWidth+2) + "┤") + "\n")
@@ -4072,12 +4099,12 @@ func (m model) renderSearchModal() string {
 	if len(m.searchResults) == 0 {
 		if m.searchQuery == "" {
 			emptyMsg := "  Type to search across all resources..."
-			modalContent.WriteString(borderStyle.Render("│") + " " + labelStyle.Render(emptyMsg) +
-				strings.Repeat(" ", innerWidth+1-len(emptyMsg)) + borderStyle.Render("│") + "\n")
+			modalContent.WriteString(borderStyle.Render("│") + textStyle.Render(" ") + labelStyle.Render(emptyMsg) +
+				textStyle.Render(strings.Repeat(" ", innerWidth+1-len(emptyMsg))) + borderStyle.Render("│") + "\n")
 		} else {
 			emptyMsg := "  No results found"
-			modalContent.WriteString(borderStyle.Render("│") + " " + labelStyle.Render(emptyMsg) +
-				strings.Repeat(" ", innerWidth+1-len(emptyMsg)) + borderStyle.Render("│") + "\n")
+			modalContent.WriteString(borderStyle.Render("│") + textStyle.Render(" ") + labelStyle.Render(emptyMsg) +
+				textStyle.Render(strings.Repeat(" ", innerWidth+1-len(emptyMsg))) + borderStyle.Render("│") + "\n")
 		}
 	} else {
 		displayCount := len(m.searchResults)
@@ -4095,86 +4122,41 @@ func (m model) renderSearchModal() string {
 				if len(resultLine) > innerWidth {
 					resultLine = resultLine[:innerWidth-3] + "..."
 				}
-				modalContent.WriteString(borderStyle.Render("│") + " " + selectedStyle.Render(resultLine) +
-					strings.Repeat(" ", innerWidth+1-len(resultLine)) + borderStyle.Render("│") + "\n")
+				modalContent.WriteString(borderStyle.Render("│") + textStyle.Render(" ") + selectedStyle.Render(resultLine) +
+					textStyle.Render(strings.Repeat(" ", innerWidth+1-len(resultLine))) + borderStyle.Render("│") + "\n")
 			} else {
 				resultLine = fmt.Sprintf("    [%s] %s", result.Type, result.Name)
 				if len(resultLine) > innerWidth {
 					resultLine = resultLine[:innerWidth-3] + "..."
 				}
-				modalContent.WriteString(borderStyle.Render("│") + " " + textStyle.Render(resultLine) +
-					strings.Repeat(" ", innerWidth+1-len(resultLine)) + borderStyle.Render("│") + "\n")
+				modalContent.WriteString(borderStyle.Render("│") + textStyle.Render(" ") + textStyle.Render(resultLine) +
+					textStyle.Render(strings.Repeat(" ", innerWidth+1-len(resultLine))) + borderStyle.Render("│") + "\n")
 			}
 		}
 
 		if len(m.searchResults) > maxResults {
 			moreMsg := fmt.Sprintf("  ... and %d more results", len(m.searchResults)-maxResults)
-			modalContent.WriteString(borderStyle.Render("│") + " " + labelStyle.Render(moreMsg) +
-				strings.Repeat(" ", innerWidth+1-len(moreMsg)) + borderStyle.Render("│") + "\n")
+			modalContent.WriteString(borderStyle.Render("│") + textStyle.Render(" ") + labelStyle.Render(moreMsg) +
+				textStyle.Render(strings.Repeat(" ", innerWidth+1-len(moreMsg))) + borderStyle.Render("│") + "\n")
 		}
 	}
 
 	// Empty line
-	modalContent.WriteString(borderStyle.Render("│") + strings.Repeat(" ", innerWidth+2) + borderStyle.Render("│") + "\n")
+	modalContent.WriteString(borderStyle.Render("│") + textStyle.Render(strings.Repeat(" ", innerWidth+2)) + borderStyle.Render("│") + "\n")
 
 	// Bottom border with controls
 	modalContent.WriteString(borderStyle.Render("├" + strings.Repeat("─", innerWidth+2) + "┤") + "\n")
 
 	// Controls
 	controls := "  [↑↓] Navigate   [Enter] Jump   [ESC] Cancel"
-	modalContent.WriteString(borderStyle.Render("│") + " " + labelStyle.Render(controls) +
-		strings.Repeat(" ", innerWidth+1-len(controls)) + borderStyle.Render("│") + "\n")
+	modalContent.WriteString(borderStyle.Render("│") + textStyle.Render(" ") + labelStyle.Render(controls) +
+		textStyle.Render(strings.Repeat(" ", innerWidth+1-len(controls))) + borderStyle.Render("│") + "\n")
 
 	// Bottom border
 	modalContent.WriteString(borderStyle.Render("╰" + strings.Repeat("─", innerWidth+2) + "╯") + "\n")
 
-	// Split into lines
-	modalLines := strings.Split(modalContent.String(), "\n")
-
-	// Calculate vertical position (center)
-	modalHeight := len(modalLines)
-	topPadding := (height - modalHeight) / 2
-	if topPadding < 0 {
-		topPadding = 0
-	}
-
-	// Overlay modal on dimmed base
-	baseLines := strings.Split(dimmedBase, "\n")
-	var result strings.Builder
-
-	for i := 0; i < height; i++ {
-		if i >= topPadding && i < topPadding+modalHeight {
-			modalLineIdx := i - topPadding
-			if modalLineIdx < len(modalLines) {
-				// Overlay modal on the base line
-				leftPadding := (width - modalWidth) / 2
-				if leftPadding < 0 {
-					leftPadding = 0
-				}
-
-				if i < len(baseLines) {
-					baseLine := baseLines[i]
-					// Simply place modal at the calculated position, background is already dimmed
-					if leftPadding > 0 && len(baseLine) > leftPadding {
-						result.WriteString(baseLine[:leftPadding] + modalLines[modalLineIdx])
-					} else {
-						result.WriteString(strings.Repeat(" ", leftPadding) + modalLines[modalLineIdx])
-					}
-				} else {
-					result.WriteString(strings.Repeat(" ", leftPadding) + modalLines[modalLineIdx])
-				}
-			} else {
-				if i < len(baseLines) {
-					result.WriteString(baseLines[i])
-				}
-			}
-		} else if i < len(baseLines) {
-			result.WriteString(baseLines[i])
-		}
-		result.WriteString("\n")
-	}
-
-	return result.String()
+	// Use overlay helper to render modal on dimmed background
+	return overlayModal(baseView, modalContent.String(), width, height, modalWidth)
 }
 
 func (m model) renderDeleteConfirm() string {
@@ -4217,12 +4199,6 @@ func (m model) renderDeleteConfirm() string {
 		resourceName = m.selectedNetwork.Name
 	}
 
-	// Dim the base view
-	dimStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#666666"))
-
-	dimmedBase := dimStyle.Render(baseView)
-
 	// Modal dimensions
 	modalWidth := 50
 	if modalWidth > width-10 {
@@ -4233,14 +4209,15 @@ func (m model) renderDeleteConfirm() string {
 	var modalContent strings.Builder
 
 	borderColor := lipgloss.Color("#666666")
+	modalBg := lipgloss.Color("#0a0a0a")
 	textColor := lipgloss.Color("#CCCCCC")
 	warningColor := lipgloss.Color("#FFFFFF")
 	subTextColor := lipgloss.Color("#999999")
 
-	borderStyle := lipgloss.NewStyle().Foreground(borderColor)
-	textStyle := lipgloss.NewStyle().Foreground(textColor)
-	warningStyle := lipgloss.NewStyle().Foreground(warningColor)
-	subStyle := lipgloss.NewStyle().Foreground(subTextColor)
+	borderStyle := lipgloss.NewStyle().Foreground(borderColor).Background(modalBg)
+	textStyle := lipgloss.NewStyle().Foreground(textColor).Background(modalBg)
+	warningStyle := lipgloss.NewStyle().Foreground(warningColor).Background(modalBg)
+	subStyle := lipgloss.NewStyle().Foreground(subTextColor).Background(modalBg)
 
 	// Calculate inner width
 	innerWidth := modalWidth - 4
@@ -4251,21 +4228,21 @@ func (m model) renderDeleteConfirm() string {
 	// Title
 	title := " Delete " + resourceType + " "
 	padding := strings.Repeat(" ", innerWidth+2-len(title))
-	modalContent.WriteString(borderStyle.Render("│") + textStyle.Render(title) + padding + borderStyle.Render("│") + "\n")
+	modalContent.WriteString(borderStyle.Render("│") + textStyle.Render(title) + textStyle.Render(padding) + borderStyle.Render("│") + "\n")
 
 	// Divider
 	modalContent.WriteString(borderStyle.Render("├" + strings.Repeat("─", innerWidth+2) + "┤") + "\n")
 
 	// Empty line
-	modalContent.WriteString(borderStyle.Render("│") + strings.Repeat(" ", innerWidth+2) + borderStyle.Render("│") + "\n")
+	modalContent.WriteString(borderStyle.Render("│") + textStyle.Render(strings.Repeat(" ", innerWidth+2)) + borderStyle.Render("│") + "\n")
 
 	// Warning message
 	warning := " Are you sure you want to delete?"
 	warningPadding := strings.Repeat(" ", innerWidth+2-len(warning))
-	modalContent.WriteString(borderStyle.Render("│") + warningStyle.Render(warning) + warningPadding + borderStyle.Render("│") + "\n")
+	modalContent.WriteString(borderStyle.Render("│") + warningStyle.Render(warning) + textStyle.Render(warningPadding) + borderStyle.Render("│") + "\n")
 
 	// Empty line
-	modalContent.WriteString(borderStyle.Render("│") + strings.Repeat(" ", innerWidth+2) + borderStyle.Render("│") + "\n")
+	modalContent.WriteString(borderStyle.Render("│") + textStyle.Render(strings.Repeat(" ", innerWidth+2)) + borderStyle.Render("│") + "\n")
 
 	// Resource name
 	resourceText := " " + resourceType + ": " + resourceName
@@ -4273,10 +4250,10 @@ func (m model) renderDeleteConfirm() string {
 		resourceText = resourceText[:innerWidth-3] + "..."
 	}
 	resourcePadding := strings.Repeat(" ", innerWidth+2-len(resourceText))
-	modalContent.WriteString(borderStyle.Render("│") + subStyle.Render(resourceText) + resourcePadding + borderStyle.Render("│") + "\n")
+	modalContent.WriteString(borderStyle.Render("│") + subStyle.Render(resourceText) + textStyle.Render(resourcePadding) + borderStyle.Render("│") + "\n")
 
 	// Empty line
-	modalContent.WriteString(borderStyle.Render("│") + strings.Repeat(" ", innerWidth+2) + borderStyle.Render("│") + "\n")
+	modalContent.WriteString(borderStyle.Render("│") + textStyle.Render(strings.Repeat(" ", innerWidth+2)) + borderStyle.Render("│") + "\n")
 
 	// Footer
 	modalContent.WriteString(borderStyle.Render("├" + strings.Repeat("─", innerWidth+2) + "┤") + "\n")
@@ -4284,52 +4261,13 @@ func (m model) renderDeleteConfirm() string {
 	// Keyboard shortcuts
 	footerText := " " + renderShortcut("Enter") + " confirm, " + renderShortcut("Esc") + " cancel"
 	footerPadding := strings.Repeat(" ", innerWidth+2-len(stripAnsiCodes(footerText)))
-	modalContent.WriteString(borderStyle.Render("│") + footerText + footerPadding + borderStyle.Render("│") + "\n")
+	modalContent.WriteString(borderStyle.Render("│") + footerText + textStyle.Render(footerPadding) + borderStyle.Render("│") + "\n")
 
 	// Bottom border
 	modalContent.WriteString(borderStyle.Render("╰" + strings.Repeat("─", innerWidth+2) + "╯") + "\n")
 
-	// Overlay modal on base view
-	modal := modalContent.String()
-	modalLines := strings.Split(modal, "\n")
-
-	baseLines := strings.Split(dimmedBase, "\n")
-	var result strings.Builder
-
-	// Center modal vertically and horizontally
-	modalHeight := len(modalLines)
-	verticalPadding := (height - modalHeight) / 2
-	if verticalPadding < 0 {
-		verticalPadding = 0
-	}
-
-	for i := 0; i < len(baseLines); i++ {
-		if i >= verticalPadding && i < verticalPadding+modalHeight && i < len(baseLines) {
-			modalLineIdx := i - verticalPadding
-			if modalLineIdx < len(modalLines) {
-				// Overlay modal on the base line
-				leftPadding := (width - modalWidth) / 2
-				if leftPadding < 0 {
-					leftPadding = 0
-				}
-
-				baseLine := baseLines[i]
-				// Simply place modal at the calculated position, background is already dimmed
-				if leftPadding > 0 && len(baseLine) > leftPadding {
-					result.WriteString(baseLine[:leftPadding] + modalLines[modalLineIdx])
-				} else {
-					result.WriteString(strings.Repeat(" ", leftPadding) + modalLines[modalLineIdx])
-				}
-			} else {
-				result.WriteString(baseLines[i])
-			}
-		} else if i < len(baseLines) {
-			result.WriteString(baseLines[i])
-		}
-		result.WriteString("\n")
-	}
-
-	return result.String()
+	// Use overlay helper to render modal on dimmed background
+	return overlayModal(baseView, modalContent.String(), width, height, modalWidth)
 }
 
 func (m model) renderRunImageModal() string {

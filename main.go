@@ -3510,19 +3510,26 @@ func (m model) renderDeleteConfirm() string {
 	}
 
 	for i := 0; i < len(baseLines); i++ {
-		if i >= verticalPadding && i < verticalPadding+modalHeight {
+		if i >= verticalPadding && i < verticalPadding+modalHeight && i < len(baseLines) {
 			modalLineIdx := i - verticalPadding
 			if modalLineIdx < len(modalLines) {
-				// Center modal horizontally
+				// Overlay modal on the base line
 				leftPadding := (width - modalWidth) / 2
 				if leftPadding < 0 {
 					leftPadding = 0
 				}
-				result.WriteString(strings.Repeat(" ", leftPadding) + modalLines[modalLineIdx])
+
+				baseLine := baseLines[i]
+				// Simply place modal at the calculated position, background is already dimmed
+				if leftPadding > 0 && len(baseLine) > leftPadding {
+					result.WriteString(baseLine[:leftPadding] + modalLines[modalLineIdx])
+				} else {
+					result.WriteString(strings.Repeat(" ", leftPadding) + modalLines[modalLineIdx])
+				}
 			} else {
 				result.WriteString(baseLines[i])
 			}
-		} else {
+		} else if i < len(baseLines) {
 			result.WriteString(baseLines[i])
 		}
 		result.WriteString("\n")

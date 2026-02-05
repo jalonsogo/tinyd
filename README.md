@@ -119,6 +119,8 @@ Network topology at a glance:
 
 ## ⌨️ Keyboard Reference
 
+> **Note:** All letter keys work in both uppercase and lowercase (case-insensitive).
+
 ### Navigation
 | Key | Action |
 |-----|--------|

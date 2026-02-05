@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"time"
+
 	tea "github.com/charmbracelet/bubbletea"
 	"tinyd/internal/types"
 )
@@ -70,7 +72,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case types.InspectMsg:
-		m.inspectContent = string(msg)
+		if m.showRawJSON {
+			m.inspectContent = string(msg)
+		} else {
+			m.inspectContent = m.formatInspectOutput(string(msg))
+		}
 		return m, nil
 
 	case types.TickMsg:
@@ -145,8 +151,15 @@ func (m *Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	// Global keys (work in all modes)
 	switch key {
-	case "q", "ctrl+c":
-		return m, tea.Quit
+	case "ctrl+c":
+		// Double Ctrl+C to exit
+		now := time.Now()
+		if now.Sub(m.lastCtrlC) < 500*time.Millisecond {
+			return m, tea.Quit
+		}
+		m.lastCtrlC = now
+		m.statusMessage = "Press Ctrl+C again to exit"
+		return m, nil
 	case "F1", "?":
 		m.showHelp = !m.showHelp
 		return m, nil
@@ -166,9 +179,35 @@ func (m *Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 // handleListViewKeys processes input in list view
-// This is a simplified version showing the pattern
 func (m *Model) handleListViewKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
+
+	// Handle delete confirmation mode
+	if m.deleteConfirmMode {
+		switch key {
+		case "left", "h":
+			m.deleteConfirmOption = 0 // Yes
+			return m, nil
+		case "right", "l":
+			m.deleteConfirmOption = 1 // No
+			return m, nil
+		case "enter":
+			if m.deleteConfirmOption == 0 && m.selectedRow < len(m.containers) {
+				// User confirmed delete
+				container := m.containers[m.selectedRow]
+				m.deleteConfirmMode = false
+				m.actionInProgress = true
+				return m, m.deleteContainerCmd(container.ID, container.Name)
+			}
+			// User cancelled or selected No
+			m.deleteConfirmMode = false
+			return m, nil
+		case "esc":
+			m.deleteConfirmMode = false
+			return m, nil
+		}
+		return m, nil
+	}
 
 	switch key {
 	case "up", "k":
@@ -190,7 +229,7 @@ func (m *Model) handleListViewKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case "left", "h", "right", "l", "1", "2", "3", "4":
+	case "left", "h", "right", "1", "2", "3", "4":
 		return m.handleTabSwitch(key)
 
 	case "enter":
@@ -204,6 +243,38 @@ func (m *Model) handleListViewKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, m.fetchVolumesCmd()
 		case 3:
 			return m, m.fetchNetworksCmd()
+		}
+		return m, nil
+
+	// Container actions (only on Containers tab)
+	case "s", "S":
+		if m.activeTab == 0 {
+			return m.handleContainerStartStop()
+		}
+		return m, nil
+	case "r", "R":
+		if m.activeTab == 0 {
+			return m.handleContainerRestart()
+		}
+		return m, nil
+	case "l", "L":
+		if m.activeTab == 0 {
+			return m.handleContainerLogs()
+		}
+		return m, nil
+	case "i", "I":
+		if m.activeTab == 0 {
+			return m.handleContainerInspect()
+		}
+		return m, nil
+	case "d", "D":
+		if m.activeTab == 0 {
+			return m.handleContainerDelete()
+		}
+		return m, nil
+	case "e", "E":
+		if m.activeTab == 0 {
+			return m.handleContainerExec()
 		}
 		return m, nil
 
@@ -279,6 +350,15 @@ func (m *Model) handleInspectViewKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "esc":
 		m.currentView = types.ViewModeList
 		m.inspectContent = ""
+		m.showRawJSON = false
+		return m, nil
+
+	case "j", "J":
+		// Toggle raw JSON view
+		m.showRawJSON = !m.showRawJSON
+		if m.selectedContainer != nil {
+			return m, m.inspectContainerCmd(m.selectedContainer.ID)
+		}
 		return m, nil
 
 	default:
@@ -299,4 +379,89 @@ func (m *Model) getMaxRow() int {
 		return len(m.networks)
 	}
 	return 0
+}
+
+// Container action handlers
+
+func (m *Model) handleContainerStartStop() (tea.Model, tea.Cmd) {
+	if m.selectedRow >= len(m.containers) {
+		return m, nil
+	}
+	container := m.containers[m.selectedRow]
+
+	// Toggle start/stop based on current status
+	if container.Status == "RUNNING" {
+		m.actionInProgress = true
+		return m, m.stopContainerCmd(container.ID, container.Name)
+	} else {
+		m.actionInProgress = true
+		return m, m.startContainerCmd(container.ID, container.Name)
+	}
+}
+
+func (m *Model) handleContainerRestart() (tea.Model, tea.Cmd) {
+	if m.selectedRow >= len(m.containers) {
+		return m, nil
+	}
+	container := m.containers[m.selectedRow]
+
+	// Only restart if running
+	if container.Status != "RUNNING" {
+		m.statusMessage = "Container must be running to restart"
+		return m, nil
+	}
+
+	m.actionInProgress = true
+	return m, m.restartContainerCmd(container.ID, container.Name)
+}
+
+func (m *Model) handleContainerLogs() (tea.Model, tea.Cmd) {
+	if m.selectedRow >= len(m.containers) {
+		return m, nil
+	}
+	container := m.containers[m.selectedRow]
+	m.selectedContainer = &container
+	m.currentView = types.ViewModeLogs
+	m.logsContent = ""
+	m.logsScrollOffset = 0
+	return m, m.getContainerLogsCmd(container.ID)
+}
+
+func (m *Model) handleContainerInspect() (tea.Model, tea.Cmd) {
+	if m.selectedRow >= len(m.containers) {
+		return m, nil
+	}
+	container := m.containers[m.selectedRow]
+	m.selectedContainer = &container
+	m.currentView = types.ViewModeInspect
+	m.inspectContent = ""
+	m.showRawJSON = false
+	return m, m.inspectContainerCmd(container.ID)
+}
+
+func (m *Model) handleContainerDelete() (tea.Model, tea.Cmd) {
+	if m.selectedRow >= len(m.containers) {
+		return m, nil
+	}
+	// Toggle delete confirmation mode
+	m.deleteConfirmMode = !m.deleteConfirmMode
+	m.deleteConfirmOption = 1 // Default to "No"
+	return m, nil
+}
+
+func (m *Model) handleContainerExec() (tea.Model, tea.Cmd) {
+	if m.selectedRow >= len(m.containers) {
+		return m, nil
+	}
+	container := m.containers[m.selectedRow]
+
+	// Only allow exec on running containers
+	if container.Status != "RUNNING" {
+		m.statusMessage = "Container must be running to exec"
+		return m, nil
+	}
+
+	// Create exec command for interactive shell
+	// The command will suspend the TUI and run in the foreground
+	return m, m.execContainerCmd(container.ID)
 }

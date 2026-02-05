@@ -2,6 +2,8 @@
 package ui
 
 import (
+	"time"
+
 	tea "github.com/charmbracelet/bubbletea"
 	"tinyd/internal/components"
 	"tinyd/internal/docker"
@@ -36,6 +38,8 @@ type Model struct {
 	actionInProgress bool
 	err              error
 	animationFrame   int // For animated status indicators
+	lastCtrlC        time.Time // For double Ctrl+C detection
+	showRawJSON      bool      // Toggle for inspect view
 
 	// View mode
 	currentView types.ViewMode

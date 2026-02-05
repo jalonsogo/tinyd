@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"os/exec"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -268,4 +269,23 @@ func (m *Model) inspectNetworkCmd(networkID string) tea.Cmd {
 		}
 		return types.InspectMsg(inspect)
 	}
+}
+
+// execContainerCmd opens an interactive shell in the container
+func (m *Model) execContainerCmd(containerID string) tea.Cmd {
+	// Try /bin/bash first
+	c := exec.Command("docker", "exec", "-it", containerID, "/bin/bash")
+	return tea.ExecProcess(c, func(err error) tea.Msg {
+		if err != nil {
+			// Fallback to /bin/sh if bash doesn't exist
+			c := exec.Command("docker", "exec", "-it", containerID, "/bin/sh")
+			return tea.ExecProcess(c, func(err error) tea.Msg {
+				if err != nil {
+					return types.ActionErrorMsg("Failed to exec: " + err.Error())
+				}
+				return nil
+			})()
+		}
+		return nil
+	})
 }

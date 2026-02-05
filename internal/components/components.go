@@ -348,7 +348,7 @@ func (t TableComponent) View() string {
 				for j, cell := range row.Cells {
 					if j < len(t.headers) {
 						// First column (index 0) is the status dot - render as-is without styling
-						if j == 0 && (strings.Contains(cell, "●") || strings.Contains(cell, "○") || strings.Contains(cell, "◌") || strings.Contains(cell, "◴") || strings.Contains(cell, "◷") || strings.Contains(cell, "◶") || strings.Contains(cell, "◵")) {
+						if j == 0 && (strings.Contains(cell, "●") || strings.Contains(cell, "○")) {
 							b.WriteString(cell)
 							if t.headers[j].Width > 1 {
 								b.WriteString(normalCellStyle.Render(strings.Repeat(" ", t.headers[j].Width-1)))
@@ -436,16 +436,29 @@ func (a ActionBarComponent) View() string {
 	b.WriteString(lineStyle.Render(strings.Repeat("─", a.width)))
 	b.WriteString("\n")
 
-	// Action bar content
+	// Action bar content: show actions on left, status on right
+	if a.actions != "" {
+		// Actions string already contains ANSI codes from renderShortcut, render as-is
+		b.WriteString(a.actions)
+	}
+
+	// If we have a status message, show it on the right
 	if a.statusMessage != "" {
 		style := statusStyle
 		if strings.HasPrefix(a.statusMessage, "ERROR:") {
 			style = errorStyle
 		}
+
+		// Calculate spacing to push status to the right
+		actionsLen := len(stripAnsiCodes(a.actions))
+		statusLen := len(a.statusMessage)
+		spacing := a.width - actionsLen - statusLen - 2 // -2 for padding
+		if spacing < 1 {
+			spacing = 1
+		}
+
+		b.WriteString(strings.Repeat(" ", spacing))
 		b.WriteString(style.Render(a.statusMessage))
-	} else if a.actions != "" {
-		// Actions string already contains ANSI codes from renderShortcut, render as-is
-		b.WriteString(a.actions)
 	}
 	b.WriteString("\n")
 

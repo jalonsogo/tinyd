@@ -243,7 +243,7 @@ func (c *Client) GetContainerLogs(ctx context.Context, containerID string, tailL
 	return string(logBytes), nil
 }
 
-// InspectContainer retrieves detailed container information
+// InspectContainer retrieves detailed container information as JSON
 func (c *Client) InspectContainer(ctx context.Context, containerID string) (string, error) {
 	if ctx == nil {
 		var cancel context.CancelFunc
@@ -256,7 +256,13 @@ func (c *Client) InspectContainer(ctx context.Context, containerID string) (stri
 		return "", fmt.Errorf("failed to inspect: %w", err)
 	}
 
-	return formatContainerInspect(inspectResult.Container), nil
+	// Return full container inspect data as JSON
+	jsonBytes, err := json.MarshalIndent(inspectResult.Container, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal inspect result: %w", err)
+	}
+
+	return string(jsonBytes), nil
 }
 
 // Helper functions
@@ -267,10 +273,17 @@ func parseContainerStatus(state, status string) string {
 		s = "RUNNING"
 	} else if string(state) == "paused" {
 		s = "PAUSED"
-	} else if string(state) == "restarting" || string(state) == "dead" || string(state) == "exited" {
+	} else if string(state) == "restarting" {
+		s = "RESTARTING"
+	} else if string(state) == "dead" || string(state) == "exited" {
 		// Check exit code for errors
 		if status != "" && strings.Contains(strings.ToLower(status), "error") {
 			s = "ERROR"
+		} else if status != "" && (strings.Contains(strings.ToLower(status), "exit") || strings.Contains(status, "(")) {
+			// Check for non-zero exit codes in format "Exited (1)" or "Exited (42)"
+			if strings.Contains(status, "Exited (") && !strings.Contains(status, "Exited (0)") {
+				s = "ERROR"
+			}
 		}
 	}
 	return s
@@ -318,14 +331,16 @@ func getStatusPriority(status string) int {
 	switch status {
 	case "RUNNING":
 		return 1
-	case "PAUSED":
+	case "RESTARTING":
 		return 2
-	case "ERROR":
+	case "PAUSED":
 		return 3
-	case "STOPPED":
+	case "ERROR":
 		return 4
-	default:
+	case "STOPPED":
 		return 5
+	default:
+		return 6
 	}
 }
 

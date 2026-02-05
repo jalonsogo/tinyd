@@ -1,8 +1,10 @@
 package ui
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 	"tinyd/internal/components"
@@ -99,33 +101,42 @@ func (m *Model) renderContainersTab() string {
 		return "No containers found"
 	}
 
-	// Calculate responsive column widths
-	availWidth := m.width - 4 // Account for padding
-	if availWidth < 50 {
-		availWidth = 50 // Minimum width
+	// Calculate responsive column widths using full terminal width
+	totalWidth := m.width - 4 // Account for padding
+	if totalWidth < 60 {
+		totalWidth = 60 // Minimum width for reasonable display
 	}
 
-	// For narrow terminals, simplify the layout
-	var headers []components.TableHeader
-	if availWidth >= 90 {
-		// Full layout for wide terminals
-		headers = []components.TableHeader{
-			{Label: "", Width: 2, AlignRight: false},
-			{Label: "NAME", Width: availWidth * 30 / 100, AlignRight: false},
-			{Label: "IMAGE", Width: availWidth * 25 / 100, AlignRight: false},
-			{Label: "STATUS", Width: 10, AlignRight: false},
-			{Label: "CPU", Width: 8, AlignRight: true},
-			{Label: "MEM", Width: 8, AlignRight: true},
-			{Label: "PORTS", Width: 15, AlignRight: false},
-		}
-	} else {
-		// Compact layout for narrow terminals (60 cols)
-		headers = []components.TableHeader{
-			{Label: "", Width: 2, AlignRight: false},
-			{Label: "NAME", Width: availWidth * 40 / 100, AlignRight: false},
-			{Label: "IMAGE", Width: availWidth * 35 / 100, AlignRight: false},
-			{Label: "STATUS", Width: availWidth * 25 / 100, AlignRight: false},
-		}
+	// Fixed columns: Status(2) + CPU(8) + MEM(8) + Ports(15)
+	// Spacing: 5 gaps * 2 spaces = 10
+	fixedWidth := 2 + 8 + 8 + 15
+	spacing := 5 * 2 // (6 columns - 1) * 2 spaces per gap
+	fillWidth := totalWidth - fixedWidth - spacing
+
+	// Ensure minimum width for fill columns
+	if fillWidth < 40 {
+		fillWidth = 40
+	}
+
+	// Two fill columns: Name and Image (distribute equally)
+	nameFill := fillWidth / 2
+	imageFill := fillWidth - nameFill
+
+	// Ensure each fill column has reasonable minimum
+	if nameFill < 20 {
+		nameFill = 20
+	}
+	if imageFill < 20 {
+		imageFill = 20
+	}
+
+	headers := []components.TableHeader{
+		{Label: "", Width: 2, AlignRight: false},          // Status dot
+		{Label: "NAME", Width: nameFill, AlignRight: false},
+		{Label: "IMAGE", Width: imageFill, AlignRight: false},
+		{Label: "CPU", Width: 8, AlignRight: true},
+		{Label: "MEM", Width: 8, AlignRight: true},
+		{Label: "PORTS", Width: 15, AlignRight: false},
 	}
 
 	// Build table rows (only visible ones based on scroll position)
@@ -153,26 +164,13 @@ func (m *Model) renderContainersTab() string {
 			continue
 		}
 
-		var cells []string
-		if availWidth >= 90 {
-			// Full layout
-			cells = []string{
-				m.getStatusDot(c.Status),
-				truncateWithEllipsis(c.Name, headers[1].Width),
-				truncateWithEllipsis(c.Image, headers[2].Width),
-				c.Status,
-				c.CPU,
-				c.Mem,
-				truncateWithEllipsis(c.Ports, 15),
-			}
-		} else {
-			// Compact layout
-			cells = []string{
-				m.getStatusDot(c.Status),
-				truncateWithEllipsis(c.Name, headers[1].Width),
-				truncateWithEllipsis(c.Image, headers[2].Width),
-				c.Status,
-			}
+		cells := []string{
+			m.getStatusDot(c.Status),
+			truncateWithEllipsis(c.Name, headers[1].Width),   // Fill column - truncate
+			truncateWithEllipsis(c.Image, headers[2].Width),  // Fill column - truncate
+			c.CPU,                                             // Fixed column - short values
+			c.Mem,                                             // Fixed column - short values
+			truncateWithEllipsis(c.Ports, 15),                // Can be long
 		}
 
 		rows = append(rows, components.TableRow{
@@ -199,28 +197,27 @@ func (m *Model) renderImagesTab() string {
 		return "No images found"
 	}
 
-	// Calculate responsive column widths
-	availWidth := m.width - 4
-	if availWidth < 50 {
-		availWidth = 50
+	// Calculate responsive column widths using full terminal width
+	totalWidth := m.width - 4
+	if totalWidth < 50 {
+		totalWidth = 50
 	}
 
-	var headers []components.TableHeader
-	if availWidth >= 90 {
-		headers = []components.TableHeader{
-			{Label: "", Width: 2, AlignRight: false},
-			{Label: "REPOSITORY", Width: availWidth * 40 / 100, AlignRight: false},
-			{Label: "TAG", Width: availWidth * 20 / 100, AlignRight: false},
-			{Label: "SIZE", Width: 10, AlignRight: true},
-			{Label: "CREATED", Width: 15, AlignRight: false},
-		}
-	} else {
-		headers = []components.TableHeader{
-			{Label: "", Width: 2, AlignRight: false},
-			{Label: "REPOSITORY", Width: availWidth * 50 / 100, AlignRight: false},
-			{Label: "TAG", Width: availWidth * 30 / 100, AlignRight: false},
-			{Label: "SIZE", Width: availWidth * 20 / 100, AlignRight: true},
-		}
+	// Fixed columns: Status(2) + Size(10) + Created(8)
+	// Spacing: 3 gaps * 2 spaces = 6
+	fixedWidth := 2 + 10 + 8
+	spacing := 3 * 2 // (4 columns - 1) * 2 spaces per gap
+	fillWidth := totalWidth - fixedWidth - spacing
+	if fillWidth < 20 {
+		fillWidth = 20
+	}
+
+	// One fill column: Repository:Tag
+	headers := []components.TableHeader{
+		{Label: "", Width: 2, AlignRight: false},              // Status
+		{Label: "REPOSITORY:TAG", Width: fillWidth, AlignRight: false},
+		{Label: "SIZE", Width: 10, AlignRight: true},
+		{Label: "CREATED", Width: 8, AlignRight: false},
 	}
 
 	// Build table rows (only visible ones based on scroll position)
@@ -248,22 +245,14 @@ func (m *Model) renderImagesTab() string {
 			continue
 		}
 
-		var cells []string
-		if availWidth >= 90 {
-			cells = []string{
-				grayStyle.Render("○"),
-				truncateWithEllipsis(img.Repository, headers[1].Width),
-				truncateWithEllipsis(img.Tag, headers[2].Width),
-				img.Size,
-				truncateWithEllipsis(img.Created, 15),
-			}
-		} else {
-			cells = []string{
-				grayStyle.Render("○"),
-				truncateWithEllipsis(img.Repository, headers[1].Width),
-				truncateWithEllipsis(img.Tag, headers[2].Width),
-				img.Size,
-			}
+		// Combine repository:tag
+		repoTag := img.Repository + ":" + img.Tag
+
+		cells := []string{
+			grayStyle.Render("○"),
+			truncateWithEllipsis(repoTag, headers[1].Width), // Fill column - truncate
+			img.Size,                                         // Fixed column - short values
+			shortenTimeAgo(img.Created),                     // Fixed column - already short
 		}
 
 		rows = append(rows, components.TableRow{
@@ -290,27 +279,31 @@ func (m *Model) renderVolumesTab() string {
 		return "No volumes found"
 	}
 
-	availWidth := m.width - 4
-	if availWidth < 50 {
-		availWidth = 50
+	// Calculate responsive column widths using full terminal width
+	totalWidth := m.width - 4
+	if totalWidth < 50 {
+		totalWidth = 50
 	}
 
-	var headers []components.TableHeader
-	if availWidth >= 90 {
-		headers = []components.TableHeader{
-			{Label: "", Width: 2, AlignRight: false},
-			{Label: "NAME", Width: availWidth * 35 / 100, AlignRight: false},
-			{Label: "DRIVER", Width: 12, AlignRight: false},
-			{Label: "IN USE", Width: 8, AlignRight: false},
-			{Label: "MOUNT POINT", Width: availWidth * 40 / 100, AlignRight: false},
-		}
-	} else {
-		headers = []components.TableHeader{
-			{Label: "", Width: 2, AlignRight: false},
-			{Label: "NAME", Width: availWidth * 60 / 100, AlignRight: false},
-			{Label: "DRIVER", Width: availWidth * 20 / 100, AlignRight: false},
-			{Label: "IN USE", Width: availWidth * 20 / 100, AlignRight: false},
-		}
+	// Fixed columns: Status(2)
+	// Spacing: 3 gaps * 2 spaces = 6
+	fixedWidth := 2
+	spacing := 3 * 2 // (4 columns - 1) * 2 spaces per gap
+	fillWidth := totalWidth - fixedWidth - spacing
+	if fillWidth < 30 {
+		fillWidth = 30
+	}
+
+	// Three fill columns: Name, Containers, Mount Point (distribute equally)
+	nameFill := fillWidth / 3
+	containersFill := fillWidth / 3
+	mountFill := fillWidth - nameFill - containersFill
+
+	headers := []components.TableHeader{
+		{Label: "", Width: 2, AlignRight: false},                    // Status
+		{Label: "NAME", Width: nameFill, AlignRight: false},
+		{Label: "CONTAINERS", Width: containersFill, AlignRight: false},
+		{Label: "MOUNT POINT", Width: mountFill, AlignRight: false},
 	}
 
 	// Build table rows (only visible ones based on scroll position)
@@ -343,27 +336,17 @@ func (m *Model) renderVolumesTab() string {
 			statusDot = greenStyle.Render("●")
 		}
 
-		inUse := "No"
-		if vol.InUse {
-			inUse = "Yes"
+		// Show container names or "-" if not in use
+		containers := vol.Containers
+		if containers == "" {
+			containers = "-"
 		}
 
-		var cells []string
-		if availWidth >= 90 {
-			cells = []string{
-				statusDot,
-				truncateWithEllipsis(vol.Name, headers[1].Width),
-				vol.Driver,
-				inUse,
-				truncateWithEllipsis(vol.Mountpoint, headers[4].Width),
-			}
-		} else {
-			cells = []string{
-				statusDot,
-				truncateWithEllipsis(vol.Name, headers[1].Width),
-				vol.Driver,
-				inUse,
-			}
+		cells := []string{
+			statusDot,
+			truncateWithEllipsis(vol.Name, headers[1].Width),       // Fill column - truncate
+			truncateWithEllipsis(containers, headers[2].Width),     // Fill column - truncate
+			truncateWithEllipsis(vol.Mountpoint, headers[3].Width), // Fill column - truncate
 		}
 
 		rows = append(rows, components.TableRow{
@@ -390,28 +373,32 @@ func (m *Model) renderNetworksTab() string {
 		return "No networks found"
 	}
 
-	availWidth := m.width - 4
-	if availWidth < 50 {
-		availWidth = 50
+	// Calculate responsive column widths using full terminal width
+	totalWidth := m.width - 4
+	if totalWidth < 50 {
+		totalWidth = 50
 	}
 
-	var headers []components.TableHeader
-	if availWidth >= 90 {
-		headers = []components.TableHeader{
-			{Label: "", Width: 2, AlignRight: false},
-			{Label: "NAME", Width: availWidth * 30 / 100, AlignRight: false},
-			{Label: "DRIVER", Width: 12, AlignRight: false},
-			{Label: "SCOPE", Width: 10, AlignRight: false},
-			{Label: "IN USE", Width: 8, AlignRight: false},
-			{Label: "IPv4", Width: availWidth * 25 / 100, AlignRight: false},
-		}
-	} else {
-		headers = []components.TableHeader{
-			{Label: "", Width: 2, AlignRight: false},
-			{Label: "NAME", Width: availWidth * 50 / 100, AlignRight: false},
-			{Label: "DRIVER", Width: availWidth * 30 / 100, AlignRight: false},
-			{Label: "IN USE", Width: availWidth * 20 / 100, AlignRight: false},
-		}
+	// Fixed columns: Status(2) + Driver(10) + Scope(8) + IPv4(18)
+	// Spacing: 5 gaps * 2 spaces = 10
+	fixedWidth := 2 + 10 + 8 + 18
+	spacing := 5 * 2 // (6 columns - 1) * 2 spaces per gap
+	fillWidth := totalWidth - fixedWidth - spacing
+	if fillWidth < 20 {
+		fillWidth = 20
+	}
+
+	// Two fill columns: Name and Containers (distribute equally)
+	nameFill := fillWidth / 2
+	containersFill := fillWidth - nameFill
+
+	headers := []components.TableHeader{
+		{Label: "", Width: 2, AlignRight: false},                        // Status
+		{Label: "NAME", Width: nameFill, AlignRight: false},
+		{Label: "CONTAINERS", Width: containersFill, AlignRight: false},
+		{Label: "DRIVER", Width: 10, AlignRight: false},
+		{Label: "SCOPE", Width: 8, AlignRight: false},
+		{Label: "IPv4", Width: 18, AlignRight: false},
 	}
 
 	// Build table rows (only visible ones based on scroll position)
@@ -444,28 +431,16 @@ func (m *Model) renderNetworksTab() string {
 			statusDot = greenStyle.Render("●")
 		}
 
-		inUse := "No"
-		if net.InUse {
-			inUse = "Yes"
-		}
+		// TODO: Add Containers field to Network type to show connected container names
+		containers := "-"
 
-		var cells []string
-		if availWidth >= 90 {
-			cells = []string{
-				statusDot,
-				truncateWithEllipsis(net.Name, headers[1].Width),
-				net.Driver,
-				net.Scope,
-				inUse,
-				truncateWithEllipsis(net.IPv4, headers[5].Width),
-			}
-		} else {
-			cells = []string{
-				statusDot,
-				truncateWithEllipsis(net.Name, headers[1].Width),
-				net.Driver,
-				inUse,
-			}
+		cells := []string{
+			statusDot,
+			truncateWithEllipsis(net.Name, headers[1].Width),       // Fill column - truncate
+			truncateWithEllipsis(containers, headers[2].Width),     // Fill column - truncate
+			net.Driver,                                              // Fixed column - short values
+			net.Scope,                                               // Fixed column - short values
+			truncateWithEllipsis(net.IPv4, 18),                     // Can be long
 		}
 
 		rows = append(rows, components.TableRow{
@@ -500,20 +475,17 @@ func (m *Model) renderInspectView() string {
 
 // getStatusDot returns a colored status indicator based on container status
 func (m *Model) getStatusDot(status string) string {
-	animFrames := []string{"◴", "◷", "◶", "◵"}
-
 	switch status {
 	case "RUNNING":
 		return greenStyle.Render("●") // Green filled circle for running
 	case "STOPPED":
 		return grayStyle.Render("○") // Gray empty circle for stopped
 	case "PAUSED":
-		return yellowStyle.Render("○") // Yellow empty circle for paused
+		return yellowStyle.Render("●") // Yellow filled circle for paused (warning state)
 	case "ERROR":
-		return redStyle.Render("◌") // Red empty circle for error
+		return redStyle.Render("●") // Red filled circle for error (attention needed)
 	case "RESTARTING":
-		// Animated pulsating green circles
-		return greenStyle.Render(animFrames[m.animationFrame])
+		return yellowStyle.Render("●") // Yellow filled circle for restarting (warning state)
 	default:
 		return grayStyle.Render("○") // Gray empty circle for unknown
 	}
@@ -532,20 +504,24 @@ func truncateWithEllipsis(s string, max int) string {
 
 // renderDeleteConfirmation renders an inline delete confirmation message
 func renderDeleteConfirmation(name string, selectedOption int) string {
+	// Delete message in white
 	confirmStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#FFFF00")).
+		Foreground(lipgloss.Color("#FFFFFF")).
 		Background(lipgloss.Color("#0a0a0a")).
 		Bold(true)
 
-	yesStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#00FF00")).
-		Background(lipgloss.Color("#0a0a0a"))
+	// Active YES button: black text on green background
+	yesActiveStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#000000")).
+		Background(lipgloss.Color("#00FF00"))
 
-	noStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#FF0000")).
-		Background(lipgloss.Color("#0a0a0a"))
+	// Active NO button: black text on red background
+	noActiveStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#000000")).
+		Background(lipgloss.Color("#FF0000"))
 
-	normalStyle := lipgloss.NewStyle().
+	// Inactive button: gray text, no background
+	inactiveStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#666666")).
 		Background(lipgloss.Color("#0a0a0a"))
 
@@ -553,11 +529,13 @@ func renderDeleteConfirmation(name string, selectedOption int) string {
 	b.WriteString(confirmStyle.Render("Delete " + truncateWithEllipsis(name, 30) + "? "))
 
 	if selectedOption == 0 {
-		b.WriteString(yesStyle.Render("[Yes]"))
-		b.WriteString(normalStyle.Render(" No"))
+		// YES is active
+		b.WriteString(yesActiveStyle.Render(" YES "))
+		b.WriteString(inactiveStyle.Render(" NO "))
 	} else {
-		b.WriteString(normalStyle.Render("Yes "))
-		b.WriteString(noStyle.Render("[No]"))
+		// NO is active
+		b.WriteString(inactiveStyle.Render(" YES "))
+		b.WriteString(noActiveStyle.Render(" NO "))
 	}
 
 	return b.String()
@@ -568,15 +546,39 @@ func (m *Model) getActionShortcuts() string {
 	var shortcuts []string
 
 	switch m.activeTab {
-	case 0: // Containers
-		shortcuts = []string{
-			renderShortcut("S", "tart"),
-			renderShortcut("S", "t", "op"),
-			renderShortcut("R", "estart"),
-			renderShortcut("L", "ogs"),
-			renderShortcut("E", "xec"),
-			renderShortcut("I", "nspect"),
-			renderShortcut("D", "elete"),
+	case 0: // Containers - dynamic based on selected container status
+		if m.selectedRow < len(m.containers) {
+			container := m.containers[m.selectedRow]
+
+			// Show appropriate actions based on container status
+			if container.Status == "RUNNING" {
+				shortcuts = []string{
+					renderShortcut("S", "top"),
+					renderShortcut("R", "estart"),
+					renderShortcut("L", "ogs"),
+					renderShortcut("E", "xec"),
+					renderShortcut("I", "nspect"),
+					renderShortcut("D", "elete"),
+				}
+			} else {
+				// Stopped, Error, or other non-running states
+				shortcuts = []string{
+					renderShortcut("S", "tart"),
+					renderShortcut("L", "ogs"),
+					renderShortcut("I", "nspect"),
+					renderShortcut("D", "elete"),
+				}
+			}
+		} else {
+			// No container selected, show all options
+			shortcuts = []string{
+				renderShortcut("S", "tart/Stop"),
+				renderShortcut("R", "estart"),
+				renderShortcut("L", "ogs"),
+				renderShortcut("E", "xec"),
+				renderShortcut("I", "nspect"),
+				renderShortcut("D", "elete"),
+			}
 		}
 	case 1: // Images
 		shortcuts = []string{
@@ -600,30 +602,178 @@ func (m *Model) getActionShortcuts() string {
 	// Add common shortcuts
 	shortcuts = append(shortcuts,
 		renderShortcut("F1", " Help"),
-		renderShortcut("Q", "uit"),
 	)
 
 	return strings.Join(shortcuts, " ")
 }
 
-// renderShortcut formats a keyboard shortcut with highlighted key
+// renderShortcut formats a keyboard shortcut with underscored first letter
 func renderShortcut(key string, rest ...string) string {
+	// First letter: white with underline
 	keyStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#00FFFF")).
+		Foreground(lipgloss.Color("#FFFFFF")).
 		Background(lipgloss.Color("#0a0a0a")).
-		Bold(true)
+		Underline(true)
 
+	// Rest of word: dimmed gray
 	textStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#666666")).
 		Background(lipgloss.Color("#0a0a0a"))
 
 	var b strings.Builder
-	b.WriteString("[")
 	b.WriteString(keyStyle.Render(key))
-	b.WriteString("]")
 	if len(rest) > 0 {
 		b.WriteString(textStyle.Render(strings.Join(rest, "")))
 	}
 
 	return b.String()
+}
+
+// formatInspectOutput formats container inspect JSON into a readable tree
+func (m *Model) formatInspectOutput(jsonStr string) string {
+	var b strings.Builder
+
+	// Parse JSON to extract key information
+	var data map[string]interface{}
+	if err := json.Unmarshal([]byte(jsonStr), &data); err != nil {
+		return "Error parsing inspect data: " + err.Error()
+	}
+
+	// Helper to safely get string values (tries multiple keys)
+	getStr := func(m map[string]interface{}, keys ...string) string {
+		for _, key := range keys {
+			if v, ok := m[key]; ok {
+				if s, ok := v.(string); ok {
+					return s
+				}
+			}
+		}
+		return "-"
+	}
+
+	// Helper to safely get nested map
+	getMap := func(m map[string]interface{}, key string) map[string]interface{} {
+		if v, ok := m[key]; ok {
+			if m, ok := v.(map[string]interface{}); ok {
+				return m
+			}
+		}
+		return make(map[string]interface{})
+	}
+
+	// Extract data (try both "ID" and "Id" for compatibility)
+	name := getStr(data, "Name")
+	if strings.HasPrefix(name, "/") {
+		name = name[1:] // Remove leading slash
+	}
+	id := getStr(data, "ID", "Id")
+	if len(id) > 12 {
+		id = id[:12]
+	}
+
+	config := getMap(data, "Config")
+	state := getMap(data, "State")
+	hostConfig := getMap(data, "HostConfig")
+
+	// Image info
+	imageName := getStr(config, "Image")
+	platform := getStr(data, "Platform")
+	if platform == "" {
+		platform = "linux/amd64" // Default
+	}
+
+	// Process info
+	entrypoint := "-"
+	if ep, ok := config["Entrypoint"]; ok && ep != nil {
+		if arr, ok := ep.([]interface{}); ok && len(arr) > 0 {
+			entrypoint = fmt.Sprintf("%v", arr[0])
+		}
+	}
+	workdir := getStr(config, "WorkingDir")
+	if workdir == "" {
+		workdir = "/"
+	}
+
+	// Lifecycle info
+	startedAt := getStr(state, "StartedAt")
+	finishedAt := getStr(state, "FinishedAt")
+	if startedAt != "" && len(startedAt) > 10 {
+		// Parse and format time (just show HH:MM:SS)
+		if t, err := time.Parse(time.RFC3339, startedAt); err == nil {
+			startedAt = t.Format("15:04:05")
+		}
+	}
+	if finishedAt != "" && len(finishedAt) > 10 {
+		if t, err := time.Parse(time.RFC3339, finishedAt); err == nil {
+			finishedAt = t.Format("15:04:05")
+		}
+	}
+
+	// State info
+	status := getStr(state, "Status")
+	exitCode := "0"
+	if ec, ok := state["ExitCode"]; ok {
+		exitCode = fmt.Sprintf("%v", ec)
+	}
+	oomKilled := "false"
+	if oom, ok := state["OOMKilled"]; ok {
+		oomKilled = fmt.Sprintf("%v", oom)
+	}
+	restartPolicy := getStr(hostConfig, "RestartPolicy")
+	if restartPolicy == "" {
+		if rp, ok := hostConfig["RestartPolicy"]; ok {
+			if rpm, ok := rp.(map[string]interface{}); ok {
+				restartPolicy = getStr(rpm, "Name")
+			}
+		}
+	}
+	if restartPolicy == "" {
+		restartPolicy = "no"
+	}
+
+	// Build tree structure
+	b.WriteString("Press [J] to toggle raw JSON view\n\n")
+	b.WriteString(fmt.Sprintf("Container\n"))
+	b.WriteString(fmt.Sprintf("├─ Name        : %s\n", name))
+	b.WriteString(fmt.Sprintf("├─ ID          : %s\n", id))
+	b.WriteString(fmt.Sprintf("│\n"))
+	b.WriteString(fmt.Sprintf("├─ Image\n"))
+	b.WriteString(fmt.Sprintf("│   ├─ Name     : %s\n", imageName))
+	b.WriteString(fmt.Sprintf("│   └─ Platform : %s\n", platform))
+	b.WriteString(fmt.Sprintf("│\n"))
+	b.WriteString(fmt.Sprintf("├─ Process\n"))
+	b.WriteString(fmt.Sprintf("│   ├─ Entrypoint : %s\n", entrypoint))
+	b.WriteString(fmt.Sprintf("│   └─ Workdir    : %s\n", workdir))
+	b.WriteString(fmt.Sprintf("│\n"))
+	b.WriteString(fmt.Sprintf("├─ Lifecycle\n"))
+	b.WriteString(fmt.Sprintf("│   ├─ Started  : %s\n", startedAt))
+	b.WriteString(fmt.Sprintf("│   └─ Finished : %s\n", finishedAt))
+	b.WriteString(fmt.Sprintf("│\n"))
+	b.WriteString(fmt.Sprintf("└─ State\n"))
+	b.WriteString(fmt.Sprintf("    ├─ Status   : %s\n", status))
+	b.WriteString(fmt.Sprintf("    ├─ ExitCode : %s\n", exitCode))
+	b.WriteString(fmt.Sprintf("    ├─ OOMKill  : %s\n", oomKilled))
+	b.WriteString(fmt.Sprintf("    └─ Restart  : %s\n", restartPolicy))
+
+	return b.String()
+}
+
+// shortenTimeAgo converts "4 hours ago" to "4h ago" format
+func shortenTimeAgo(timeStr string) string {
+	s := strings.TrimSpace(timeStr)
+	s = strings.Replace(s, " hours ago", "h ago", 1)
+	s = strings.Replace(s, " hour ago", "h ago", 1)
+	s = strings.Replace(s, " minutes ago", "m ago", 1)
+	s = strings.Replace(s, " minute ago", "m ago", 1)
+	s = strings.Replace(s, " seconds ago", "s ago", 1)
+	s = strings.Replace(s, " second ago", "s ago", 1)
+	s = strings.Replace(s, " days ago", "d ago", 1)
+	s = strings.Replace(s, " day ago", "d ago", 1)
+	s = strings.Replace(s, " weeks ago", "w ago", 1)
+	s = strings.Replace(s, " week ago", "w ago", 1)
+	s = strings.Replace(s, " months ago", "mo ago", 1)
+	s = strings.Replace(s, " month ago", "mo ago", 1)
+	s = strings.Replace(s, " years ago", "y ago", 1)
+	s = strings.Replace(s, " year ago", "y ago", 1)
+	return s
 }

@@ -1511,6 +1511,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.logsScrollOffset > 0 {
 					m.logsScrollOffset--
 				}
+				return m, nil
 			} else if m.currentView == viewModePortSelector {
 				// Port selector navigation
 				if m.selectedPortIdx > 0 {
@@ -1536,14 +1537,35 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "down", "j":
 			// Logs view scrolling
 			if m.currentView == viewModeLogs {
+				// Calculate filtered lines
 				logLines := strings.Split(m.logsContent, "\n")
-				maxScroll := len(logLines) - (m.height - 3)
+				var filteredLines []string
+				if m.logsSearchMode && m.logsSearchQuery != "" {
+					query := strings.ToLower(m.logsSearchQuery)
+					for _, line := range logLines {
+						if strings.Contains(strings.ToLower(line), query) {
+							filteredLines = append(filteredLines, line)
+						}
+					}
+				} else {
+					filteredLines = logLines
+				}
+
+				// Calculate available lines (same as in renderLogs)
+				availableLines := m.height - 7
+				if availableLines < 5 {
+					availableLines = 5
+				}
+
+				// Calculate max scroll
+				maxScroll := len(filteredLines) - availableLines
 				if maxScroll < 0 {
 					maxScroll = 0
 				}
 				if m.logsScrollOffset < maxScroll {
 					m.logsScrollOffset++
 				}
+				return m, nil
 			} else if m.currentView == viewModePortSelector {
 				// Port selector navigation
 				if m.selectedPortIdx < len(m.availablePorts)-1 {
@@ -3094,6 +3116,14 @@ func (m model) renderLogs() string {
 		width = 60
 	}
 
+	// Header component with responsive width
+	header := m.header.WithWidth(width)
+	b.WriteString(header.View())
+
+	// Tabs component with responsive width
+	tabs := m.tabs.SetActiveTab(m.activeTab).WithWidth(width)
+	b.WriteString(tabs.View())
+
 	// Styles
 	titleStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#FFFFFF")).
@@ -3149,10 +3179,25 @@ func (m model) renderLogs() string {
 		filteredLines = logLines
 	}
 
-	// Calculate available height (subtract header, divider, and a bit of margin)
-	availableLines := m.height - 3
-	if availableLines < 10 {
-		availableLines = 10
+	// Calculate available height accounting for all UI elements:
+	// - header (0 lines, empty)
+	// - tabs (3 lines)
+	// - logs title + search (1 line)
+	// - divider (1 line)
+	// - action bar (2 lines)
+	// Total UI overhead: ~7 lines
+	availableLines := m.height - 7
+	if availableLines < 5 {
+		availableLines = 5
+	}
+
+	// Ensure scroll offset is within bounds
+	maxScroll := len(filteredLines) - availableLines
+	if maxScroll < 0 {
+		maxScroll = 0
+	}
+	if m.logsScrollOffset > maxScroll {
+		m.logsScrollOffset = maxScroll
 	}
 
 	// Display logs with scrolling
@@ -3168,7 +3213,7 @@ func (m model) renderLogs() string {
 			b.WriteString(helpStyle.Render(" No logs available\n"))
 		}
 	} else {
-		for i := m.logsScrollOffset; i < end && i < len(filteredLines); i++ {
+		for i := m.logsScrollOffset; i < end; i++ {
 			line := filteredLines[i]
 			if len(line) > width {
 				line = line[:width-3] + "..."
@@ -3176,12 +3221,6 @@ func (m model) renderLogs() string {
 			b.WriteString(contentStyle.Render(line))
 			b.WriteString("\n")
 		}
-	}
-
-	// Fill remaining lines
-	linesShown := end - m.logsScrollOffset
-	for i := linesShown; i < availableLines; i++ {
-		b.WriteString("\n")
 	}
 
 	return containerStyle.Render(b.String())

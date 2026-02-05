@@ -3147,13 +3147,24 @@ func (m model) renderLogs() string {
 	// Header with search
 	titleText := fmt.Sprintf("Logs: %s", containerName)
 	var searchText string
+	var searchTextLen int
 	if m.logsSearchMode {
-		searchText = " [" + searchInputStyle.Render("Search: "+m.logsSearchQuery+"█") + "]"
+		searchInput := "Search: " + m.logsSearchQuery + "█"
+		searchText = " [" + searchInputStyle.Render(searchInput) + "]"
+		searchTextLen = len(" [") + len(searchInput) + len("]")
 	} else {
-		searchText = " " + searchButtonStyle.Render("[") + searchButtonStyle.Render("S") + helpStyle.Render("earch]")
+		// Render: " [Search]" with S highlighted
+		searchText = " [" + searchButtonStyle.Render("S") + helpStyle.Render("earch]")
+		searchTextLen = len(" [Search]")
 	}
 	headerRight := "[ESC] Back"
-	headerSpacing := strings.Repeat(" ", width-len(titleText)-len(stripAnsiCodes(searchText))-len(headerRight))
+
+	// Calculate spacing accounting for styled text
+	usedWidth := len(titleText) + searchTextLen + len(headerRight)
+	headerSpacing := ""
+	if width > usedWidth {
+		headerSpacing = strings.Repeat(" ", width-usedWidth)
+	}
 
 	b.WriteString(titleStyle.Render(titleText))
 	b.WriteString(searchText)

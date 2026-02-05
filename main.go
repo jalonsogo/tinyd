@@ -86,7 +86,6 @@ const (
 	viewModeStopConfirm
 	viewModeFilter
 	viewModeRunImage
-	viewModeDeleteConfirm
 	viewModePullImage
 )
 
@@ -172,7 +171,9 @@ type model struct {
 	selectedFilter  int
 
 	// Run image modal
-	selectedImage     *Image
+	selectedImage   *Image
+	selectedVolume  *Volume
+	selectedNetwork *Network
 	runContainerName  string
 	runPortHost       string
 	runPortContainer  string
@@ -193,9 +194,9 @@ type model struct {
 	listSearchMode  bool
 	listSearchQuery string
 
-	// Delete confirmation
-	selectedVolume *Volume
-	selectedNetwork *Network
+	// Inline delete confirmation
+	deleteConfirmMode   bool
+	deleteConfirmOption int // 0=Yes, 1=No
 
 	// Components
 	header     HeaderComponent
@@ -1545,7 +1546,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.logsScrollOffset = 0 // Reset scroll when search changes
 				}
 			}
-		} else if m.currentView == viewModeStopConfirm || m.currentView == viewModePortSelector || m.currentView == viewModeFilter || m.currentView == viewModeDeleteConfirm {
+		} else if m.currentView == viewModeStopConfirm || m.currentView == viewModePortSelector || m.currentView == viewModeFilter {
 			key := msg.String()
 			// Allow quit, ESC, and Enter to pass through to main switch
 			// Allow up/down for port selector and filter modal
@@ -1680,16 +1681,22 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.scrollOffset = 0
 			m.statusMessage = ""
 		case "left", "h":
-			// Navigate to previous tab
-			if m.activeTab > 0 {
+			if m.deleteConfirmMode {
+				// Navigate to "Yes" option
+				m.deleteConfirmOption = 0
+			} else if m.activeTab > 0 {
+				// Navigate to previous tab
 				m.activeTab--
 				m.selectedRow = 0
 				m.scrollOffset = 0
 				m.statusMessage = ""
 			}
 		case "right":
-			// Navigate to next tab
-			if m.activeTab < 3 {
+			if m.deleteConfirmMode {
+				// Navigate to "No" option
+				m.deleteConfirmOption = 1
+			} else if m.activeTab < 3 {
+				// Navigate to next tab
 				m.activeTab++
 				m.selectedRow = 0
 				m.scrollOffset = 0
@@ -1879,37 +1886,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		case "d", "D":
-			// Delete selected resource (works on all tabs)
-			if m.currentView == viewModeList {
-				switch m.activeTab {
-				case 0: // Containers
-					filteredContainers := filterContainers(m.containers, m.containerFilter)
-					if len(filteredContainers) > 0 && m.selectedRow < len(filteredContainers) {
-						selectedContainer := filteredContainers[m.selectedRow]
-						m.selectedContainer = &selectedContainer
-						m.currentView = viewModeDeleteConfirm
-					}
-				case 1: // Images
-					filteredImages := filterImages(m.images, m.containers, m.imageFilter)
-					if len(filteredImages) > 0 && m.selectedRow < len(filteredImages) {
-						selectedImage := filteredImages[m.selectedRow]
-						m.selectedImage = &selectedImage
-						m.currentView = viewModeDeleteConfirm
-					}
-				case 2: // Volumes
-					filteredVolumes := filterVolumes(m.volumes, m.containers, m.dockerClient)
-					if len(filteredVolumes) > 0 && m.selectedRow < len(filteredVolumes) {
-						selectedVolume := filteredVolumes[m.selectedRow]
-						m.selectedVolume = &selectedVolume
-						m.currentView = viewModeDeleteConfirm
-					}
-				case 3: // Networks
-					filteredNetworks := filterNetworks(m.networks, m.containers, m.dockerClient)
-					if len(filteredNetworks) > 0 && m.selectedRow < len(filteredNetworks) {
-						selectedNetwork := filteredNetworks[m.selectedRow]
-						m.selectedNetwork = &selectedNetwork
-						m.currentView = viewModeDeleteConfirm
-					}
+			// Toggle inline delete confirmation for selected resource
+			if m.currentView == viewModeList && !m.listSearchMode {
+				m.deleteConfirmMode = !m.deleteConfirmMode
+				if m.deleteConfirmMode {
+					m.deleteConfirmOption = 1 // Default to "No"
 				}
 			}
 		case "p", "P":
@@ -1919,8 +1900,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.pullImageName = ""
 			}
 		case "esc":
-			// Exit search mode in logs view, or return to list view
-			if m.currentView == viewModeLogs && m.logsSearchMode {
+			// Exit delete confirm mode, search mode, or return to list view
+			if m.deleteConfirmMode {
+				m.deleteConfirmMode = false
+			} else if m.currentView == viewModeLogs && m.logsSearchMode {
 				// Exit search mode but stay in logs view
 				m.logsSearchMode = false
 				m.logsSearchQuery = ""
@@ -1928,10 +1911,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else if m.currentView != viewModeList {
 				// Return to list view
 				m.currentView = viewModeList
-				m.selectedContainer = nil
-				m.selectedImage = nil
-				m.selectedVolume = nil
-				m.selectedNetwork = nil
 				m.logsContent = ""
 				m.inspectContent = ""
 				m.availablePorts = nil
@@ -1939,24 +1918,91 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.logsSearchQuery = ""
 			}
 		case "enter":
-			// In delete confirmation modal, execute delete based on resource type
-			if m.currentView == viewModeDeleteConfirm {
-				m.currentView = viewModeList
+			// In inline delete confirmation, execute delete if "Yes" is selected
+			if m.deleteConfirmMode && m.deleteConfirmOption == 0 {
+				m.deleteConfirmMode = false
 				m.actionInProgress = true
 
-				if m.selectedContainer != nil {
-					m.statusMessage = fmt.Sprintf("Deleting container %s...", m.selectedContainer.Name)
-					return m, deleteContainer(m.dockerClient, m.selectedContainer.ID, m.selectedContainer.Name)
-				} else if m.selectedImage != nil {
-					m.statusMessage = fmt.Sprintf("Deleting image %s:%s...", m.selectedImage.Repository, m.selectedImage.Tag)
-					return m, deleteImage(m.dockerClient, m.selectedImage.ID)
-				} else if m.selectedVolume != nil {
-					m.statusMessage = fmt.Sprintf("Deleting volume %s...", m.selectedVolume.Name)
-					return m, deleteVolume(m.dockerClient, m.selectedVolume.Name)
-				} else if m.selectedNetwork != nil {
-					m.statusMessage = fmt.Sprintf("Deleting network %s...", m.selectedNetwork.Name)
-					return m, deleteNetwork(m.dockerClient, m.selectedNetwork.ID)
+				switch m.activeTab {
+				case 0: // Containers
+					filteredContainers := filterContainers(m.containers, m.containerFilter)
+					if m.listSearchMode && m.listSearchQuery != "" {
+						query := strings.ToLower(m.listSearchQuery)
+						var searchFiltered []Container
+						for _, c := range filteredContainers {
+							if strings.Contains(strings.ToLower(c.Name), query) ||
+								strings.Contains(strings.ToLower(c.ID), query) ||
+								strings.Contains(strings.ToLower(c.Image), query) ||
+								strings.Contains(strings.ToLower(c.Status), query) {
+								searchFiltered = append(searchFiltered, c)
+							}
+						}
+						filteredContainers = searchFiltered
+					}
+					if len(filteredContainers) > 0 && m.selectedRow < len(filteredContainers) {
+						container := filteredContainers[m.selectedRow]
+						m.statusMessage = fmt.Sprintf("Deleting container %s...", container.Name)
+						return m, deleteContainer(m.dockerClient, container.ID, container.Name)
+					}
+				case 1: // Images
+					filteredImages := filterImages(m.images, m.containers, m.imageFilter)
+					if m.listSearchMode && m.listSearchQuery != "" {
+						query := strings.ToLower(m.listSearchQuery)
+						var searchFiltered []Image
+						for _, img := range filteredImages {
+							if strings.Contains(strings.ToLower(img.Repository), query) ||
+								strings.Contains(strings.ToLower(img.Tag), query) ||
+								strings.Contains(strings.ToLower(img.ID), query) {
+								searchFiltered = append(searchFiltered, img)
+							}
+						}
+						filteredImages = searchFiltered
+					}
+					if len(filteredImages) > 0 && m.selectedRow < len(filteredImages) {
+						image := filteredImages[m.selectedRow]
+						m.statusMessage = fmt.Sprintf("Deleting image %s:%s...", image.Repository, image.Tag)
+						return m, deleteImage(m.dockerClient, image.ID)
+					}
+				case 2: // Volumes
+					filteredVolumes := filterVolumes(m.volumes, m.containers, m.dockerClient)
+					if m.listSearchMode && m.listSearchQuery != "" {
+						query := strings.ToLower(m.listSearchQuery)
+						var searchFiltered []Volume
+						for _, vol := range filteredVolumes {
+							if strings.Contains(strings.ToLower(vol.Name), query) ||
+								strings.Contains(strings.ToLower(vol.Driver), query) {
+								searchFiltered = append(searchFiltered, vol)
+							}
+						}
+						filteredVolumes = searchFiltered
+					}
+					if len(filteredVolumes) > 0 && m.selectedRow < len(filteredVolumes) {
+						volume := filteredVolumes[m.selectedRow]
+						m.statusMessage = fmt.Sprintf("Deleting volume %s...", volume.Name)
+						return m, deleteVolume(m.dockerClient, volume.Name)
+					}
+				case 3: // Networks
+					filteredNetworks := filterNetworks(m.networks, m.containers, m.dockerClient)
+					if m.listSearchMode && m.listSearchQuery != "" {
+						query := strings.ToLower(m.listSearchQuery)
+						var searchFiltered []Network
+						for _, net := range filteredNetworks {
+							if strings.Contains(strings.ToLower(net.Name), query) ||
+								strings.Contains(strings.ToLower(net.ID), query) {
+								searchFiltered = append(searchFiltered, net)
+							}
+						}
+						filteredNetworks = searchFiltered
+					}
+					if len(filteredNetworks) > 0 && m.selectedRow < len(filteredNetworks) {
+						network := filteredNetworks[m.selectedRow]
+						m.statusMessage = fmt.Sprintf("Deleting network %s...", network.Name)
+						return m, deleteNetwork(m.dockerClient, network.ID)
+					}
 				}
+			} else if m.deleteConfirmMode && m.deleteConfirmOption == 1 {
+				// "No" selected - cancel delete
+				m.deleteConfirmMode = false
 			}
 
 			// In run image modal, execute run container
@@ -2634,8 +2680,6 @@ func (m model) View() string {
 		return m.renderRunImageModal()
 	case viewModePullImage:
 		return m.renderPullImageModal()
-	case viewModeDeleteConfirm:
-		return m.renderDeleteConfirm()
 	}
 
 	// Render based on active tab (list view)
@@ -2785,21 +2829,74 @@ func (m model) renderContainers() string {
 				portsCell = truncateWithEllipsis(container.Ports, portsWidth)
 			}
 
-			rows = append(rows, TableRow{
-				Cells: []string{
-					"",           // Empty column
-					statusDot,    // Status dot
-					"",           // Empty column
-					nameCell,     // Container name (fill)
-					"",           // Empty column
-					imageCell,    // Image name (fill)
-					cpuCell,      // CPU (4 columns)
-					memCell,      // MEM (10 columns)
-					portsCell,    // PORTS (15 columns)
-				},
-				IsSelected: i == m.selectedRow,
-				Style:      rowStyle,
-			})
+			// Check if this row should show delete confirmation
+			if m.deleteConfirmMode && i == m.selectedRow {
+				// Build inline delete confirmation
+				deleteBg := lipgloss.Color("#610202")
+				nameColor := lipgloss.Color("#FFFFFF")
+				questionColor := lipgloss.Color("#EA3323")
+
+				nameStyle := lipgloss.NewStyle().Foreground(nameColor).Background(deleteBg)
+				questionStyle := lipgloss.NewStyle().Foreground(questionColor).Background(deleteBg)
+				optionStyle := lipgloss.NewStyle().Foreground(nameColor).Background(deleteBg)
+
+				// Build the message: "object , Delete this Container? Yes No"
+				var deleteMsg strings.Builder
+				deleteMsg.WriteString(statusDot)
+				deleteMsg.WriteString("  ")
+				deleteMsg.WriteString(nameStyle.Render(nameCell))
+				deleteMsg.WriteString(questionStyle.Render(" , Delete this Container? "))
+
+				// Yes and No with underscored first letters
+				if m.deleteConfirmOption == 0 {
+					// Yes is selected
+					deleteMsg.WriteString(optionStyle.Bold(true).Underline(true).Render("Y"))
+					deleteMsg.WriteString(optionStyle.Bold(true).Render("es"))
+					deleteMsg.WriteString(optionStyle.Render(" "))
+					deleteMsg.WriteString(optionStyle.Render("N"))
+					deleteMsg.WriteString(optionStyle.Render("o"))
+				} else {
+					// No is selected
+					deleteMsg.WriteString(optionStyle.Render("Y"))
+					deleteMsg.WriteString(optionStyle.Render("es"))
+					deleteMsg.WriteString(optionStyle.Render(" "))
+					deleteMsg.WriteString(optionStyle.Bold(true).Underline(true).Render("N"))
+					deleteMsg.WriteString(optionStyle.Bold(true).Render("o"))
+				}
+
+				// Pad the rest of the row with delete background
+				msgLen := len(stripAnsiCodes(deleteMsg.String()))
+				totalWidth := width - 4 // Adjust for padding
+				if msgLen < totalWidth {
+					deleteMsg.WriteString(lipgloss.NewStyle().Background(deleteBg).Render(strings.Repeat(" ", totalWidth-msgLen)))
+				}
+
+				// Create a single-cell row that spans the entire width
+				rows = append(rows, TableRow{
+					Cells: []string{
+						deleteMsg.String(),
+						"", "", "", "", "", "", "", "", // Empty cells for the rest
+					},
+					IsSelected: true,
+					Style:      normalStyle,
+				})
+			} else {
+				rows = append(rows, TableRow{
+					Cells: []string{
+						"",           // Empty column
+						statusDot,    // Status dot
+						"",           // Empty column
+						nameCell,     // Container name (fill)
+						"",           // Empty column
+						imageCell,    // Image name (fill)
+						cpuCell,      // CPU (4 columns)
+						memCell,      // MEM (10 columns)
+						portsCell,    // PORTS (15 columns)
+					},
+					IsSelected: i == m.selectedRow,
+					Style:      rowStyle,
+				})
+			}
 		}
 		table = table.SetRows(rows)
 	}
@@ -2957,22 +3054,76 @@ func (m model) renderImages() string {
 				createdCell = truncateWithEllipsis(image.Created, createdWidth)
 			}
 
-			cells := []string{
-				"",          // Empty column
-				statusDot,   // Status dot
-				"",          // Empty column
-				repoCell,    // Repository (fill)
-				"",          // Empty column
-				tagCell,     // Tag (12 columns)
-				sizeCell,    // Size (8 columns)
-				createdCell, // Created (10 columns)
-			}
+			// Check if this row should show delete confirmation
+			if m.deleteConfirmMode && isSelected {
+				// Build inline delete confirmation
+				deleteBg := lipgloss.Color("#610202")
+				nameColor := lipgloss.Color("#FFFFFF")
+				questionColor := lipgloss.Color("#EA3323")
 
-			rows = append(rows, TableRow{
-				Cells:      cells,
-				IsSelected: isSelected,
-				Style:      normalStyle,
-			})
+				nameStyle := lipgloss.NewStyle().Foreground(nameColor).Background(deleteBg)
+				questionStyle := lipgloss.NewStyle().Foreground(questionColor).Background(deleteBg)
+				optionStyle := lipgloss.NewStyle().Foreground(nameColor).Background(deleteBg)
+
+				// Build the message: "object , Delete this Image? Yes No"
+				imageName := repoCell + ":" + tagCell
+				var deleteMsg strings.Builder
+				deleteMsg.WriteString(statusDot)
+				deleteMsg.WriteString("  ")
+				deleteMsg.WriteString(nameStyle.Render(imageName))
+				deleteMsg.WriteString(questionStyle.Render(" , Delete this Image? "))
+
+				// Yes and No with underscored first letters
+				if m.deleteConfirmOption == 0 {
+					// Yes is selected
+					deleteMsg.WriteString(optionStyle.Bold(true).Underline(true).Render("Y"))
+					deleteMsg.WriteString(optionStyle.Bold(true).Render("es"))
+					deleteMsg.WriteString(optionStyle.Render(" "))
+					deleteMsg.WriteString(optionStyle.Render("N"))
+					deleteMsg.WriteString(optionStyle.Render("o"))
+				} else {
+					// No is selected
+					deleteMsg.WriteString(optionStyle.Render("Y"))
+					deleteMsg.WriteString(optionStyle.Render("es"))
+					deleteMsg.WriteString(optionStyle.Render(" "))
+					deleteMsg.WriteString(optionStyle.Bold(true).Underline(true).Render("N"))
+					deleteMsg.WriteString(optionStyle.Bold(true).Render("o"))
+				}
+
+				// Pad the rest of the row with delete background
+				msgLen := len(stripAnsiCodes(deleteMsg.String()))
+				totalWidth := width - 4 // Adjust for padding
+				if msgLen < totalWidth {
+					deleteMsg.WriteString(lipgloss.NewStyle().Background(deleteBg).Render(strings.Repeat(" ", totalWidth-msgLen)))
+				}
+
+				// Create a single-cell row that spans the entire width
+				rows = append(rows, TableRow{
+					Cells: []string{
+						deleteMsg.String(),
+						"", "", "", "", "", "", "", // Empty cells for the rest
+					},
+					IsSelected: true,
+					Style:      normalStyle,
+				})
+			} else {
+				cells := []string{
+					"",          // Empty column
+					statusDot,   // Status dot
+					"",          // Empty column
+					repoCell,    // Repository (fill)
+					"",          // Empty column
+					tagCell,     // Tag (12 columns)
+					sizeCell,    // Size (8 columns)
+					createdCell, // Created (10 columns)
+				}
+
+				rows = append(rows, TableRow{
+					Cells:      cells,
+					IsSelected: isSelected,
+					Style:      normalStyle,
+				})
+			}
 		}
 		table = table.SetRows(rows)
 	}
@@ -3118,23 +3269,76 @@ func (m model) renderVolumes() string {
 				createdCell = truncateWithEllipsis(volume.Created, createdWidth)
 			}
 
-			cells := []string{
-				"",             // Empty column
-				statusDot,      // Status dot
-				"",             // Empty column
-				nameCell,       // Name (fill)
-				"",             // Empty column
-				driverCell,     // Driver (8 columns)
-				"",             // Empty column
-				containerCell,  // Container (fill)
-				createdCell,    // Created (10 columns)
-			}
+			// Check if this row should show delete confirmation
+			if m.deleteConfirmMode && isSelected {
+				// Build inline delete confirmation
+				deleteBg := lipgloss.Color("#610202")
+				nameColor := lipgloss.Color("#FFFFFF")
+				questionColor := lipgloss.Color("#EA3323")
 
-			rows = append(rows, TableRow{
-				Cells:      cells,
-				IsSelected: isSelected,
-				Style:      normalStyle,
-			})
+				nameStyle := lipgloss.NewStyle().Foreground(nameColor).Background(deleteBg)
+				questionStyle := lipgloss.NewStyle().Foreground(questionColor).Background(deleteBg)
+				optionStyle := lipgloss.NewStyle().Foreground(nameColor).Background(deleteBg)
+
+				// Build the message: "object , Delete this Volume? Yes No"
+				var deleteMsg strings.Builder
+				deleteMsg.WriteString(statusDot)
+				deleteMsg.WriteString("  ")
+				deleteMsg.WriteString(nameStyle.Render(nameCell))
+				deleteMsg.WriteString(questionStyle.Render(" , Delete this Volume? "))
+
+				// Yes and No with underscored first letters
+				if m.deleteConfirmOption == 0 {
+					// Yes is selected
+					deleteMsg.WriteString(optionStyle.Bold(true).Underline(true).Render("Y"))
+					deleteMsg.WriteString(optionStyle.Bold(true).Render("es"))
+					deleteMsg.WriteString(optionStyle.Render(" "))
+					deleteMsg.WriteString(optionStyle.Render("N"))
+					deleteMsg.WriteString(optionStyle.Render("o"))
+				} else {
+					// No is selected
+					deleteMsg.WriteString(optionStyle.Render("Y"))
+					deleteMsg.WriteString(optionStyle.Render("es"))
+					deleteMsg.WriteString(optionStyle.Render(" "))
+					deleteMsg.WriteString(optionStyle.Bold(true).Underline(true).Render("N"))
+					deleteMsg.WriteString(optionStyle.Bold(true).Render("o"))
+				}
+
+				// Pad the rest of the row with delete background
+				msgLen := len(stripAnsiCodes(deleteMsg.String()))
+				totalWidth := width - 4 // Adjust for padding
+				if msgLen < totalWidth {
+					deleteMsg.WriteString(lipgloss.NewStyle().Background(deleteBg).Render(strings.Repeat(" ", totalWidth-msgLen)))
+				}
+
+				// Create a single-cell row that spans the entire width
+				rows = append(rows, TableRow{
+					Cells: []string{
+						deleteMsg.String(),
+						"", "", "", "", "", "", "", "", // Empty cells for the rest
+					},
+					IsSelected: true,
+					Style:      normalStyle,
+				})
+			} else {
+				cells := []string{
+					"",             // Empty column
+					statusDot,      // Status dot
+					"",             // Empty column
+					nameCell,       // Name (fill)
+					"",             // Empty column
+					driverCell,     // Driver (8 columns)
+					"",             // Empty column
+					containerCell,  // Container (fill)
+					createdCell,    // Created (10 columns)
+				}
+
+				rows = append(rows, TableRow{
+					Cells:      cells,
+					IsSelected: isSelected,
+					Style:      normalStyle,
+				})
+			}
 		}
 		table = table.SetRows(rows)
 	}
@@ -3285,23 +3489,76 @@ func (m model) renderNetworks() string {
 				ipv6Cell = truncateWithEllipsis(network.IPv6, ipv6Width)
 			}
 
-			cells := []string{
-				"",          // Empty column
-				statusDot,   // Status dot
-				"",          // Empty column
-				nameCell,    // Name (fill)
-				"",          // Empty column
-				driverCell,  // Driver (8 columns)
-				scopeCell,   // Scope (8 columns)
-				ipv4Cell,    // IPv4 (18 columns)
-				ipv6Cell,    // IPv6 (18 columns)
-			}
+			// Check if this row should show delete confirmation
+			if m.deleteConfirmMode && isSelected {
+				// Build inline delete confirmation
+				deleteBg := lipgloss.Color("#610202")
+				nameColor := lipgloss.Color("#FFFFFF")
+				questionColor := lipgloss.Color("#EA3323")
 
-			rows = append(rows, TableRow{
-				Cells:      cells,
-				IsSelected: isSelected,
-				Style:      normalStyle,
-			})
+				nameStyle := lipgloss.NewStyle().Foreground(nameColor).Background(deleteBg)
+				questionStyle := lipgloss.NewStyle().Foreground(questionColor).Background(deleteBg)
+				optionStyle := lipgloss.NewStyle().Foreground(nameColor).Background(deleteBg)
+
+				// Build the message: "object , Delete this Network? Yes No"
+				var deleteMsg strings.Builder
+				deleteMsg.WriteString(statusDot)
+				deleteMsg.WriteString("  ")
+				deleteMsg.WriteString(nameStyle.Render(nameCell))
+				deleteMsg.WriteString(questionStyle.Render(" , Delete this Network? "))
+
+				// Yes and No with underscored first letters
+				if m.deleteConfirmOption == 0 {
+					// Yes is selected
+					deleteMsg.WriteString(optionStyle.Bold(true).Underline(true).Render("Y"))
+					deleteMsg.WriteString(optionStyle.Bold(true).Render("es"))
+					deleteMsg.WriteString(optionStyle.Render(" "))
+					deleteMsg.WriteString(optionStyle.Render("N"))
+					deleteMsg.WriteString(optionStyle.Render("o"))
+				} else {
+					// No is selected
+					deleteMsg.WriteString(optionStyle.Render("Y"))
+					deleteMsg.WriteString(optionStyle.Render("es"))
+					deleteMsg.WriteString(optionStyle.Render(" "))
+					deleteMsg.WriteString(optionStyle.Bold(true).Underline(true).Render("N"))
+					deleteMsg.WriteString(optionStyle.Bold(true).Render("o"))
+				}
+
+				// Pad the rest of the row with delete background
+				msgLen := len(stripAnsiCodes(deleteMsg.String()))
+				totalWidth := width - 4 // Adjust for padding
+				if msgLen < totalWidth {
+					deleteMsg.WriteString(lipgloss.NewStyle().Background(deleteBg).Render(strings.Repeat(" ", totalWidth-msgLen)))
+				}
+
+				// Create a single-cell row that spans the entire width
+				rows = append(rows, TableRow{
+					Cells: []string{
+						deleteMsg.String(),
+						"", "", "", "", "", "", "", "", // Empty cells for the rest
+					},
+					IsSelected: true,
+					Style:      normalStyle,
+				})
+			} else {
+				cells := []string{
+					"",          // Empty column
+					statusDot,   // Status dot
+					"",          // Empty column
+					nameCell,    // Name (fill)
+					"",          // Empty column
+					driverCell,  // Driver (8 columns)
+					scopeCell,   // Scope (8 columns)
+					ipv4Cell,    // IPv4 (18 columns)
+					ipv6Cell,    // IPv6 (18 columns)
+				}
+
+				rows = append(rows, TableRow{
+					Cells:      cells,
+					IsSelected: isSelected,
+					Style:      normalStyle,
+				})
+			}
 		}
 		table = table.SetRows(rows)
 	}
@@ -3852,116 +4109,6 @@ func (m model) renderPullImageModal() string {
 	return overlayModal(baseView, modalContent.String(), width, height, modalWidth)
 }
 
-func (m model) renderDeleteConfirm() string {
-	// Use responsive dimensions
-	width := m.width
-	if width < 60 {
-		width = 60
-	}
-	height := m.height
-	if height < 20 {
-		height = 20
-	}
-
-	// Render base view based on active tab
-	var baseView string
-	switch m.activeTab {
-	case 0:
-		baseView = m.renderContainers()
-	case 1:
-		baseView = m.renderImages()
-	case 2:
-		baseView = m.renderVolumes()
-	case 3:
-		baseView = m.renderNetworks()
-	}
-
-	// Determine resource type and name
-	var resourceType, resourceName string
-	if m.selectedContainer != nil {
-		resourceType = "Container"
-		resourceName = m.selectedContainer.Name
-	} else if m.selectedImage != nil {
-		resourceType = "Image"
-		resourceName = m.selectedImage.Repository + ":" + m.selectedImage.Tag
-	} else if m.selectedVolume != nil {
-		resourceType = "Volume"
-		resourceName = m.selectedVolume.Name
-	} else if m.selectedNetwork != nil {
-		resourceType = "Network"
-		resourceName = m.selectedNetwork.Name
-	}
-
-	// Modal dimensions
-	modalWidth := 50
-	if modalWidth > width-10 {
-		modalWidth = width - 10
-	}
-
-	// Build modal with box-drawing characters
-	var modalContent strings.Builder
-
-	borderColor := lipgloss.Color("#666666")
-	modalBg := lipgloss.Color("#0a0a0a")
-	textColor := lipgloss.Color("#CCCCCC")
-	warningColor := lipgloss.Color("#FFFFFF")
-	subTextColor := lipgloss.Color("#999999")
-
-	borderStyle := lipgloss.NewStyle().Foreground(borderColor).Background(modalBg)
-	textStyle := lipgloss.NewStyle().Foreground(textColor).Background(modalBg)
-	warningStyle := lipgloss.NewStyle().Foreground(warningColor).Background(modalBg)
-	subStyle := lipgloss.NewStyle().Foreground(subTextColor).Background(modalBg)
-
-	// Calculate inner width
-	innerWidth := modalWidth - 4
-
-	// Top border
-	modalContent.WriteString(borderStyle.Render("╭" + strings.Repeat("─", innerWidth+2) + "╮") + "\n")
-
-	// Title
-	title := " Delete " + resourceType + " "
-	padding := strings.Repeat(" ", innerWidth+2-len(title))
-	modalContent.WriteString(borderStyle.Render("│") + textStyle.Render(title) + textStyle.Render(padding) + borderStyle.Render("│") + "\n")
-
-	// Divider
-	modalContent.WriteString(borderStyle.Render("├" + strings.Repeat("─", innerWidth+2) + "┤") + "\n")
-
-	// Empty line
-	modalContent.WriteString(borderStyle.Render("│") + textStyle.Render(strings.Repeat(" ", innerWidth+2)) + borderStyle.Render("│") + "\n")
-
-	// Warning message
-	warning := " Are you sure you want to delete?"
-	warningPadding := strings.Repeat(" ", innerWidth+2-len(warning))
-	modalContent.WriteString(borderStyle.Render("│") + warningStyle.Render(warning) + textStyle.Render(warningPadding) + borderStyle.Render("│") + "\n")
-
-	// Empty line
-	modalContent.WriteString(borderStyle.Render("│") + textStyle.Render(strings.Repeat(" ", innerWidth+2)) + borderStyle.Render("│") + "\n")
-
-	// Resource name
-	resourceText := " " + resourceType + ": " + resourceName
-	if len(resourceText) > innerWidth {
-		resourceText = resourceText[:innerWidth-3] + "..."
-	}
-	resourcePadding := strings.Repeat(" ", innerWidth+2-len(resourceText))
-	modalContent.WriteString(borderStyle.Render("│") + subStyle.Render(resourceText) + textStyle.Render(resourcePadding) + borderStyle.Render("│") + "\n")
-
-	// Empty line
-	modalContent.WriteString(borderStyle.Render("│") + textStyle.Render(strings.Repeat(" ", innerWidth+2)) + borderStyle.Render("│") + "\n")
-
-	// Footer
-	modalContent.WriteString(borderStyle.Render("├" + strings.Repeat("─", innerWidth+2) + "┤") + "\n")
-
-	// Keyboard shortcuts
-	footerText := " " + renderShortcut("Enter") + " confirm, " + renderShortcut("Esc") + " cancel"
-	footerPadding := strings.Repeat(" ", innerWidth+2-len(stripAnsiCodes(footerText)))
-	modalContent.WriteString(borderStyle.Render("│") + footerText + textStyle.Render(footerPadding) + borderStyle.Render("│") + "\n")
-
-	// Bottom border
-	modalContent.WriteString(borderStyle.Render("╰" + strings.Repeat("─", innerWidth+2) + "╯") + "\n")
-
-	// Use overlay helper to render modal on dimmed background
-	return overlayModal(baseView, modalContent.String(), width, height, modalWidth)
-}
 
 func (m model) renderRunImageModal() string {
 	// Use responsive dimensions

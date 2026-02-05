@@ -309,35 +309,52 @@ func (t TableComponent) View() string {
 		for i := t.start; i < t.end && i < len(t.rows); i++ {
 			row := t.rows[i]
 
-			for j, cell := range row.Cells {
-				if j < len(t.headers) {
-					// Second column (index 1) is the status dot - render as-is without styling
-					if j == 1 && strings.Contains(cell, "●") {
-						b.WriteString(cell)
-						if t.headers[j].Width > 1 {
-							b.WriteString(normalCellStyle.Render(strings.Repeat(" ", t.headers[j].Width-1)))
-						}
-					} else {
-						// Apply alignment based on header
-						var cellText string
-						if t.headers[j].AlignRight {
-							cellText = padLeft(cell, t.headers[j].Width)
-						} else {
-							cellText = padRight(cell, t.headers[j].Width)
-						}
-
-						if row.IsSelected {
-							b.WriteString(selectedCellStyle.Render(cellText))
-						} else {
-							b.WriteString(normalCellStyle.Render(cellText))
-						}
-					}
-					if j < len(t.headers)-1 {
-						b.WriteString(normalCellStyle.Render("  "))
-					}
+			// Check if this is a special full-width row (like delete confirmation)
+			// Detect by checking if all cells after index 0 are empty
+			isFullWidthRow := len(row.Cells) > 1
+			for j := 1; j < len(row.Cells); j++ {
+				if row.Cells[j] != "" {
+					isFullWidthRow = false
+					break
 				}
 			}
-			b.WriteString("\n")
+
+			if isFullWidthRow && row.Cells[0] != "" {
+				// Render the full-width cell as-is without any padding or styling
+				b.WriteString(row.Cells[0])
+				b.WriteString("\n")
+			} else {
+				// Normal row rendering
+				for j, cell := range row.Cells {
+					if j < len(t.headers) {
+						// Second column (index 1) is the status dot - render as-is without styling
+						if j == 1 && strings.Contains(cell, "●") {
+							b.WriteString(cell)
+							if t.headers[j].Width > 1 {
+								b.WriteString(normalCellStyle.Render(strings.Repeat(" ", t.headers[j].Width-1)))
+							}
+						} else {
+							// Apply alignment based on header
+							var cellText string
+							if t.headers[j].AlignRight {
+								cellText = padLeft(cell, t.headers[j].Width)
+							} else {
+								cellText = padRight(cell, t.headers[j].Width)
+							}
+
+							if row.IsSelected {
+								b.WriteString(selectedCellStyle.Render(cellText))
+							} else {
+								b.WriteString(normalCellStyle.Render(cellText))
+							}
+						}
+						if j < len(t.headers)-1 {
+							b.WriteString(normalCellStyle.Render("  "))
+						}
+					}
+				}
+				b.WriteString("\n")
+			}
 		}
 	}
 

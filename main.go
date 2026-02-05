@@ -152,6 +152,8 @@ type model struct {
 	currentView       viewMode
 	logsContent       string
 	logsScrollOffset  int
+	logsSearchMode    bool
+	logsSearchQuery   string
 	inspectContent    string
 	inspectMode       int // 0=stats, 1=image, 2=mounts
 	selectedContainer *Container
@@ -1431,6 +1433,26 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.currentView == viewModeRunImage {
 			// Run modal - allow all keys for text input and navigation
 			return m, m.handleRunModalInput(msg)
+		} else if m.currentView == viewModeLogs && m.logsSearchMode {
+			// Logs search mode - handle text input
+			key := msg.String()
+			switch key {
+			case "backspace":
+				if len(m.logsSearchQuery) > 0 {
+					m.logsSearchQuery = m.logsSearchQuery[:len(m.logsSearchQuery)-1]
+					m.logsScrollOffset = 0 // Reset scroll when search changes
+				}
+			case "ctrl+c", "q", "esc", "s", "S":
+				// Pass through to main switch for special keys
+			case "up", "k", "down", "j":
+				// Pass through to main switch for navigation
+			default:
+				// Add character to search query (only if it's a single character)
+				if len(key) == 1 {
+					m.logsSearchQuery += key
+					m.logsScrollOffset = 0 // Reset scroll when search changes
+				}
+			}
 		} else if m.currentView == viewModeStopConfirm || m.currentView == viewModePortSelector || m.currentView == viewModeFilter || m.currentView == viewModeDeleteConfirm {
 			key := msg.String()
 			// Allow quit, ESC, and Enter to pass through to main switch
@@ -1452,8 +1474,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, tea.Quit
 		case "up", "k":
-			// Port selector navigation
-			if m.currentView == viewModePortSelector {
+			// Logs view scrolling
+			if m.currentView == viewModeLogs {
+				if m.logsScrollOffset > 0 {
+					m.logsScrollOffset--
+				}
+			} else if m.currentView == viewModePortSelector {
+				// Port selector navigation
 				if m.selectedPortIdx > 0 {
 					m.selectedPortIdx--
 				}
@@ -1475,8 +1502,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		case "down", "j":
-			// Port selector navigation
-			if m.currentView == viewModePortSelector {
+			// Logs view scrolling
+			if m.currentView == viewModeLogs {
+				logLines := strings.Split(m.logsContent, "\n")
+				maxScroll := len(logLines) - (m.height - 3)
+				if maxScroll < 0 {
+					maxScroll = 0
+				}
+				if m.logsScrollOffset < maxScroll {
+					m.logsScrollOffset++
+				}
+			} else if m.currentView == viewModePortSelector {
+				// Port selector navigation
 				if m.selectedPortIdx < len(m.availablePorts)-1 {
 					m.selectedPortIdx++
 				}
@@ -1579,8 +1616,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		case "s", "S":
-			// Start/Stop only works on containers tab
-			if m.activeTab == 0 {
+			// Toggle search mode in logs view
+			if m.currentView == viewModeLogs {
+				m.logsSearchMode = !m.logsSearchMode
+				if !m.logsSearchMode {
+					// Clear search query when exiting search mode
+					m.logsSearchQuery = ""
+					m.logsScrollOffset = 0
+				}
+			} else if m.activeTab == 0 {
+				// Start/Stop only works on containers tab
 				filteredContainers := filterContainers(m.containers, m.containerFilter)
 				if len(filteredContainers) > 0 && m.selectedRow < len(filteredContainers) {
 					selectedContainer := filteredContainers[m.selectedRow]
@@ -1741,8 +1786,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// TODO: Implement image pull modal/prompt
 			}
 		case "esc":
-			// Return to list view
-			if m.currentView != viewModeList {
+			// Exit search mode in logs view, or return to list view
+			if m.currentView == viewModeLogs && m.logsSearchMode {
+				// Exit search mode but stay in logs view
+				m.logsSearchMode = false
+				m.logsSearchQuery = ""
+				m.logsScrollOffset = 0
+			} else if m.currentView != viewModeList {
+				// Return to list view
 				m.currentView = viewModeList
 				m.selectedContainer = nil
 				m.selectedImage = nil
@@ -1751,6 +1802,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.logsContent = ""
 				m.inspectContent = ""
 				m.availablePorts = nil
+				m.logsSearchMode = false
+				m.logsSearchQuery = ""
 			}
 		case "enter":
 			// In delete confirmation modal, execute delete based on resource type
@@ -2959,6 +3012,8 @@ func (m model) renderNetworks() string {
 }
 
 func (m model) renderLogs() string {
+	var b strings.Builder
+
 	containerName := "Container"
 	if m.selectedContainer != nil {
 		containerName = m.selectedContainer.Name
@@ -2969,12 +3024,97 @@ func (m model) renderLogs() string {
 		width = 60
 	}
 
-	title := fmt.Sprintf("Logs: %s", containerName)
-	detailView := NewDetailViewComponent(title, 15).WithWidth(width)
-	detailView = detailView.SetContent(m.logsContent)
-	detailView = detailView.SetScroll(m.logsScrollOffset)
+	// Styles
+	titleStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#FFFFFF")).
+		Bold(true)
 
-	return containerStyle.Render(detailView.View())
+	searchButtonStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#00FFFF"))
+
+	searchInputStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#FFFFFF"))
+
+	helpStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#666666"))
+
+	lineStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#303030"))
+
+	contentStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#666666"))
+
+	// Header with search
+	titleText := fmt.Sprintf("Logs: %s", containerName)
+	var searchText string
+	if m.logsSearchMode {
+		searchText = " [" + searchInputStyle.Render("Search: "+m.logsSearchQuery+"█") + "]"
+	} else {
+		searchText = " " + searchButtonStyle.Render("[") + searchButtonStyle.Render("S") + helpStyle.Render("earch]")
+	}
+	headerRight := "[ESC] Back"
+	headerSpacing := strings.Repeat(" ", width-len(titleText)-len(stripAnsiCodes(searchText))-len(headerRight))
+
+	b.WriteString(titleStyle.Render(titleText))
+	b.WriteString(searchText)
+	b.WriteString(headerSpacing)
+	b.WriteString(helpStyle.Render(headerRight))
+	b.WriteString("\n")
+
+	// Content divider
+	b.WriteString(lineStyle.Render(strings.Repeat("─", width)))
+	b.WriteString("\n")
+
+	// Filter logs if search is active
+	logLines := strings.Split(m.logsContent, "\n")
+	var filteredLines []string
+	if m.logsSearchMode && m.logsSearchQuery != "" {
+		query := strings.ToLower(m.logsSearchQuery)
+		for _, line := range logLines {
+			if strings.Contains(strings.ToLower(line), query) {
+				filteredLines = append(filteredLines, line)
+			}
+		}
+	} else {
+		filteredLines = logLines
+	}
+
+	// Calculate available height (subtract header, divider, and a bit of margin)
+	availableLines := m.height - 3
+	if availableLines < 10 {
+		availableLines = 10
+	}
+
+	// Display logs with scrolling
+	end := m.logsScrollOffset + availableLines
+	if end > len(filteredLines) {
+		end = len(filteredLines)
+	}
+
+	if len(filteredLines) == 0 {
+		if m.logsSearchMode && m.logsSearchQuery != "" {
+			b.WriteString(helpStyle.Render(" No matching logs found\n"))
+		} else {
+			b.WriteString(helpStyle.Render(" No logs available\n"))
+		}
+	} else {
+		for i := m.logsScrollOffset; i < end && i < len(filteredLines); i++ {
+			line := filteredLines[i]
+			if len(line) > width {
+				line = line[:width-3] + "..."
+			}
+			b.WriteString(contentStyle.Render(line))
+			b.WriteString("\n")
+		}
+	}
+
+	// Fill remaining lines
+	linesShown := end - m.logsScrollOffset
+	for i := linesShown; i < availableLines; i++ {
+		b.WriteString("\n")
+	}
+
+	return containerStyle.Render(b.String())
 }
 
 func (m model) renderInspect() string {

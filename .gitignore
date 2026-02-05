@@ -21,3 +21,6 @@ go.work
 *.swp
 *.swo
 *~
+*.backup
+tuik
+docker-tui

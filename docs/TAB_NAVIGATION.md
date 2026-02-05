@@ -1,6 +1,6 @@
 # Enhanced Tab Navigation
 
-The Docker TUI now features improved tab navigation with a modern visual design and multiple ways to switch between tabs.
+tinyd now features improved tab navigation with a modern visual design and multiple ways to switch between tabs.
 
 ## New Tab Design
 

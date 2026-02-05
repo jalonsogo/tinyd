@@ -1,16 +1,16 @@
-# 🐋 TUIK - Docker Terminal UI
+# 🐋 tinyd - Docker Terminal UI
 
-![TUIK Screenshot](tuik.png)
+![tinyd Screenshot](tinyd.png)
 
 > A blazingly fast, beautifully minimal Terminal User Interface for Docker management. Built with Go and Bubble Tea.
 
-![Docker TUI](https://img.shields.io/badge/docker-TUI-blue?style=for-the-badge&logo=docker)
+![tinyd](https://img.shields.io/badge/docker-tinyd-blue?style=for-the-badge&logo=docker)
 ![Go](https://img.shields.io/badge/go-1.19+-00ADD8?style=for-the-badge&logo=go)
 ![License](https://img.shields.io/badge/license-LOLcense-purple?style=for-the-badge)
 
-## ✨ Why TUIK?
+## ✨ Why tinyd?
 
-**TUIK** (Terminal UI Kit) transforms Docker management into a delightful terminal experience. No more memorizing complex CLI commands or switching between browser tabs. Everything you need is right at your fingertips.
+**tinyd** (Terminal UI Kit) transforms Docker management into a delightful terminal experience. No more memorizing complex CLI commands or switching between browser tabs. Everything you need is right at your fingertips.
 
 ### 🎯 Standout Features
 
@@ -44,14 +44,14 @@
 
 ```bash
 # Clone the repository
-git clone https://github.com/jalonsogo/tuik.git
-cd tuik
+git clone https://github.com/jalonsogo/tinyd.git
+cd tinyd
 
 # Build the binary
-go build -o tuik
+go build -o tinyd
 
 # Run it!
-./tuik
+./tinyd
 ```
 
 ### Prerequisites
@@ -174,13 +174,13 @@ Network topology at a glance:
 
 **Local Docker** (default):
 ```bash
-./tuik
+./tinyd
 ```
 
 **Remote Docker**:
 ```bash
 export DOCKER_HOST=tcp://remote-host:2376
-./tuik
+./tinyd
 ```
 
 **Docker Desktop** (macOS/Windows): Automatically detected!
@@ -204,7 +204,6 @@ For {root} sake I'm a designer. Mostly all the code has been written by chatGPT 
 
 - Built with [Charm](https://charm.sh/) libraries (Bubble Tea, Lipgloss)
 - Inspired by k9s, lazydocker, and other terminal tools
-- Designed with Pencil UI specifications
 
 ---
 

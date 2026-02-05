@@ -1,4 +1,4 @@
-module docker-tui
+module tinyd
 
 go 1.24.5
 

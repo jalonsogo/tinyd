@@ -226,7 +226,7 @@ type EnvVar struct {
 }
 
 // SearchResult for global search
-// Color palette matching the Pencil design
+// Minimalistic color palette
 var (
 	// Minimalistic color palette
 	bgColor     = lipgloss.Color("#0a0a0a")
@@ -325,7 +325,7 @@ func initialModel() model {
 		loading:        true,
 
 		// Initialize components
-		header:     NewHeaderComponent("Docker TUI v2.0.1", "[F1] Help [Q]uit"),
+		header:     NewHeaderComponent("tinyd v2.0.1", "[F1] Help [Q]uit"),
 		tabs:       NewTabsComponent(tabs, 0),
 		actionBar:  NewActionBarComponent(),
 		detailView: NewDetailViewComponent("", 15),
@@ -4372,7 +4372,7 @@ func (m model) renderError() string {
 		Foreground(lipgloss.Color("#303030")).
 		Background(lipgloss.Color("#0a0a0a"))
 
-	title := "Docker TUI - Error"
+	title := "tinyd - Error"
 	b.WriteString(titleStyle.Render(title))
 	b.WriteString("\n")
 	b.WriteString(lineStyle.Render(strings.Repeat("─", width)))
@@ -4448,7 +4448,7 @@ func (m model) renderHelp() string {
 		b.WriteString("\n")
 	}
 
-	renderLine("Docker TUI - Help", titleStyle)
+	renderLine("tinyd - Help", titleStyle)
 	b.WriteString(lineStyle.Render(strings.Repeat("─", width)))
 	b.WriteString("\n")
 	renderLine("Navigation:", headerStyle)

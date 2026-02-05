@@ -1,6 +1,6 @@
 # Console Feature with Altscreen Support
 
-The Docker TUI provides an interactive console feature that uses **altscreen** technology to seamlessly open container shells without disrupting your TUI session.
+tinyd provides an interactive console feature that uses **altscreen** technology to seamlessly open container shells without disrupting your TUI session.
 
 ## What is Altscreen?
 

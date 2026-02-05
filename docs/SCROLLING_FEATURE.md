@@ -1,6 +1,6 @@
 # Scrolling Feature
 
-The Docker TUI now includes intelligent viewport scrolling to handle large lists without losing the UI.
+tinyd now includes intelligent viewport scrolling to handle large lists without losing the UI.
 
 ## Problem Solved
 
@@ -155,7 +155,7 @@ Switching tabs resets the view to the top.
 - Easy to find items in long lists
 
 ### 4. Maintains Design ✓
-- Original Pencil design preserved
+- Original design preserved
 - Same visual aesthetics
 - Classic terminal look
 - Clean and minimal

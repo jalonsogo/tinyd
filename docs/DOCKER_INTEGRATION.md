@@ -2,7 +2,7 @@
 
 ## What Was Added
 
-The Docker TUI application has been successfully integrated with the Docker API to display real, live container data.
+tinyd has been successfully integrated with the Docker API to display real, live container data.
 
 ## Key Features Implemented
 
@@ -76,7 +76,7 @@ With Docker running, the application will:
 Based on your running container:
 ```
 ┌─────────────────────────────────────────────────────────────────────────────────────┐
-│ Docker TUI v2.0.1                                            [F1] Help [Q]uit │
+│ tinyd v2.0.1                                            [F1] Help [Q]uit │
 ├─────────────────────────────────────────────────────────────────────────────────────┤
 │ [1]Containers  [2]Images  [3]Volumes  [4]Networks                                   │
 ├─────────────────────────────────────────────────────────────────────────────────────┤
@@ -105,7 +105,7 @@ Potential improvements:
 ## Run the Application
 
 ```bash
-./docker-tui
+./tinyd
 ```
 
 The TUI will launch in fullscreen mode and connect to your Docker daemon automatically!

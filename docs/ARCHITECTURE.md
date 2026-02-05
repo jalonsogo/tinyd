@@ -1,6 +1,6 @@
 # Architecture - Component-Based Design
 
-The Docker TUI has been refactored to use proper Bubble Tea components for better maintainability and reusability.
+tinyd has been refactored to use proper Bubble Tea components for better maintainability and reusability.
 
 ## Component Architecture
 
@@ -40,14 +40,14 @@ Model (Root)
 
 **Usage:**
 ```go
-header := NewHeaderComponent("Docker TUI v2.0.1", "[F1] Help [Q]uit")
+header := NewHeaderComponent("tinyd v2.0.1", "[F1] Help [Q]uit")
 output := header.View()
 ```
 
 **Renders:**
 ```
 ┌─────────────────────────────────────────────────┐
-│ Docker TUI v2.0.1            [F1] Help [Q]uit │
+│ tinyd v2.0.1            [F1] Help [Q]uit │
 ```
 
 ---
@@ -212,7 +212,7 @@ Components are initialized once in `initialModel()`:
 ```go
 func initialModel() model {
     return model{
-        header: NewHeaderComponent("Docker TUI v2.0.1", "[F1] Help [Q]uit"),
+        header: NewHeaderComponent("tinyd v2.0.1", "[F1] Help [Q]uit"),
         tabs: NewTabsComponent(tabs, 0),
         actionBar: NewActionBarComponent(),
         detailView: NewDetailViewComponent("", 15),
@@ -308,7 +308,7 @@ m.actionBar = m.actionBar.SetStatusMessage("Success")
 ## Code Organization
 
 ```
-docker-tui/
+tinyd/
 ├── main.go          # Main app logic, Update(), business logic
 ├── components.go    # All UI components
 ├── go.mod           # Dependencies
@@ -406,4 +406,4 @@ func (m model) renderView() string {
 
 ---
 
-**The component architecture makes the Docker TUI more maintainable, testable, and extensible!** 🏗️
+**The component architecture makes tinyd more maintainable, testable, and extensible!** 🏗️

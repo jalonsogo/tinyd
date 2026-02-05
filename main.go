@@ -2496,12 +2496,13 @@ func (m model) addFilterIndicator(tabsView string, filterName string, width int)
 
 // overlayModal renders a modal centered on top of a base view with dimmed background
 func overlayModal(baseView string, modalContent string, width, height, modalWidth int) string {
+	_ = baseView // Keep parameter for API consistency but render clean dimmed background
+
 	dimBg := lipgloss.NewStyle().
 		Foreground(dimOverlay).
 		Background(bgColor)
 
 	modalLines := strings.Split(modalContent, "\n")
-	baseLines := strings.Split(baseView, "\n")
 
 	// Calculate modal position
 	modalHeight := len(modalLines)
@@ -2525,16 +2526,8 @@ func overlayModal(baseView string, modalContent string, width, height, modalWidt
 
 				// Left dimmed area
 				if leftPadding > 0 {
-					if i < len(baseLines) && len(baseLines[i]) > 0 {
-						// Dim the left part of base line
-						leftPart := baseLines[i]
-						if len(leftPart) > leftPadding {
-							leftPart = leftPart[:leftPadding]
-						}
-						line.WriteString(dimBg.Render(stripAnsiCodes(leftPart)))
-					} else {
-						line.WriteString(dimBg.Render(strings.Repeat(" ", leftPadding)))
-					}
+					// Always render exactly leftPadding spaces for consistent alignment
+					line.WriteString(dimBg.Render(strings.Repeat(" ", leftPadding)))
 				}
 
 				// Modal content (not dimmed)
@@ -2550,18 +2543,12 @@ func overlayModal(baseView string, modalContent string, width, height, modalWidt
 
 				result.WriteString(line.String())
 			} else {
-				// Shouldn't happen, but fallback
-				if i < len(baseLines) {
-					result.WriteString(dimBg.Render(stripAnsiCodes(baseLines[i])))
-				}
-			}
-		} else {
-			// Non-modal row - render dimmed base
-			if i < len(baseLines) {
-				result.WriteString(dimBg.Render(stripAnsiCodes(baseLines[i])))
-			} else {
+				// Shouldn't happen, but fallback to full width dimmed
 				result.WriteString(dimBg.Render(strings.Repeat(" ", width)))
 			}
+		} else {
+			// Non-modal row - render full width dimmed background
+			result.WriteString(dimBg.Render(strings.Repeat(" ", width)))
 		}
 		result.WriteString("\n")
 	}

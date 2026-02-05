@@ -3131,18 +3131,6 @@ func (m model) renderLogs() string {
 		Background(lipgloss.Color("#1668B8")). // Mid-point between #1D85E1 and #0F4FA9
 		Bold(true)
 
-	searchButtonStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#FFFF00")). // Yellow for visibility on blue
-		Background(lipgloss.Color("#1668B8"))
-
-	searchInputStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#FFFFFF")).
-		Background(lipgloss.Color("#1668B8"))
-
-	headerRightStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#CCCCCC")).
-		Background(lipgloss.Color("#1668B8"))
-
 	lineStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#303030"))
 
@@ -3153,35 +3141,29 @@ func (m model) renderLogs() string {
 		Foreground(lipgloss.Color("#666666"))
 
 	// Build header bar with full-width blue background
-	titleText := fmt.Sprintf("Logs: %s", containerName)
+	titleText := fmt.Sprintf("  Logs: %s  ", containerName)
 	var searchText string
-	var searchTextLen int
 	if m.logsSearchMode {
 		searchInput := "Search: " + m.logsSearchQuery + "█"
-		searchText = " [" + searchInputStyle.Render(searchInput) + "]"
-		searchTextLen = len(" [") + len(searchInput) + len("]")
+		searchText = "[" + searchInput + "]"
 	} else {
 		// Render: " [Search]" with S highlighted in yellow
-		searchText = " [" + searchButtonStyle.Render("S") + searchInputStyle.Render("earch]")
-		searchTextLen = len(" [Search]")
+		searchText = "[Search]"
 	}
-	headerRight := "[ESC] Back"
+	headerRight := "  [ESC] Back  "
 
-	// Calculate spacing to fill entire width with blue background
-	usedWidth := len(titleText) + searchTextLen + len(headerRight)
-	headerSpacing := ""
-	if width > usedWidth {
-		headerSpacing = strings.Repeat(" ", width-usedWidth)
+	// Build full-width header with blue background
+	headerContent := titleText + searchText
+	padding := width - len(headerContent) - len(headerRight)
+	if padding < 0 {
+		padding = 0
 	}
 
-	// Render full-width header bar with blue background
-	var headerBar strings.Builder
-	headerBar.WriteString(headerBarStyle.Render(titleText))
-	headerBar.WriteString(searchText)
-	headerBar.WriteString(headerBarStyle.Render(headerSpacing))
-	headerBar.WriteString(headerRightStyle.Render(headerRight))
+	// Create full-width blue background header
+	fullHeader := titleText + searchText + strings.Repeat(" ", padding) + headerRight
 
-	b.WriteString(headerBar.String())
+	// Apply blue background to entire line
+	b.WriteString(headerBarStyle.Render(fullHeader))
 	b.WriteString("\n")
 
 	// Content divider

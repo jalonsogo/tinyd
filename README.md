@@ -1,5 +1,7 @@
 # 🐋 TUIK - Docker Terminal UI
 
+![TUIK Screenshot](tuik.png)
+
 > A blazingly fast, beautifully minimal Terminal User Interface for Docker management. Built with Go and Bubble Tea.
 
 ![Docker TUI](https://img.shields.io/badge/docker-TUI-blue?style=for-the-badge&logo=docker)

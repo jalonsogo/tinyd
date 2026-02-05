@@ -1501,7 +1501,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.logsSearchQuery = m.logsSearchQuery[:len(m.logsSearchQuery)-1]
 					m.logsScrollOffset = 0 // Reset scroll when search changes
 				}
-			case "ctrl+c", "q", "esc", "s", "S":
+			case "ctrl+c", "esc", "s", "S":
 				// Pass through to main switch for special keys
 			case "up", "k", "down", "j":
 				// Pass through to main switch for navigation
@@ -1516,7 +1516,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			key := msg.String()
 			// Allow quit, ESC, and Enter to pass through to main switch
 			// Allow up/down for port selector and filter modal
-			if key == "ctrl+c" || key == "q" || key == "esc" || key == "enter" {
+			if key == "ctrl+c" || key == "esc" || key == "enter" {
 				// Pass through to main switch
 			} else if (key == "up" || key == "k" || key == "down" || key == "j") && (m.currentView == viewModePortSelector || m.currentView == viewModeFilter) {
 				// Allow navigation in port selector and filter modal
@@ -1527,7 +1527,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		switch msg.String() {
-		case "ctrl+c", "q":
+		case "ctrl+c":
 			if m.dockerClient != nil {
 				m.dockerClient.Close()
 			}

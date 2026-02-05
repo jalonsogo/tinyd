@@ -4180,12 +4180,6 @@ func (m model) renderRunImageModal() string {
 		imageName = m.selectedImage.Repository + ":" + m.selectedImage.Tag
 	}
 
-	// Dim the base view
-	dimStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#666666"))
-
-	dimmedBase := dimStyle.Render(baseView)
-
 	// Modal dimensions
 	modalWidth := 70
 	if modalWidth > width-10 {
@@ -4196,16 +4190,17 @@ func (m model) renderRunImageModal() string {
 	var modalContent strings.Builder
 
 	borderColor := lipgloss.Color("#666666")
+	modalBg := lipgloss.Color("#0a0a0a")
 	textColor := lipgloss.Color("#CCCCCC")
 	labelColor := lipgloss.Color("#999999")
 	inputColor := lipgloss.Color("#FFFFFF")
 	activeColor := lipgloss.Color("#00FF00") // Green for active field
 
-	borderStyle := lipgloss.NewStyle().Foreground(borderColor)
-	textStyle := lipgloss.NewStyle().Foreground(textColor)
-	labelStyle := lipgloss.NewStyle().Foreground(labelColor)
-	inputStyle := lipgloss.NewStyle().Foreground(inputColor)
-	activeStyle := lipgloss.NewStyle().Foreground(activeColor).Bold(true)
+	borderStyle := lipgloss.NewStyle().Foreground(borderColor).Background(modalBg)
+	textStyle := lipgloss.NewStyle().Foreground(textColor).Background(modalBg)
+	labelStyle := lipgloss.NewStyle().Foreground(labelColor).Background(modalBg)
+	inputStyle := lipgloss.NewStyle().Foreground(inputColor).Background(modalBg)
+	activeStyle := lipgloss.NewStyle().Foreground(activeColor).Background(modalBg).Bold(true)
 
 	// Calculate inner width
 	innerWidth := modalWidth - 4
@@ -4390,45 +4385,13 @@ func (m model) renderRunImageModal() string {
 	// Keyboard shortcuts
 	footerText := " " + renderShortcut("Tab") + " next, " + renderShortcut("Enter") + " add/run, " + renderShortcut("Esc") + " cancel"
 	footerPadding := strings.Repeat(" ", innerWidth+2-len(stripAnsiCodes(footerText)))
-	modalContent.WriteString(borderStyle.Render("│") + footerText + footerPadding + borderStyle.Render("│") + "\n")
+	modalContent.WriteString(borderStyle.Render("│") + footerText + textStyle.Render(footerPadding) + borderStyle.Render("│") + "\n")
 
 	// Bottom border
 	modalContent.WriteString(borderStyle.Render("╰" + strings.Repeat("─", innerWidth+2) + "╯") + "\n")
 
-	// Overlay modal on base view
-	modal := modalContent.String()
-	modalLines := strings.Split(modal, "\n")
-
-	baseLines := strings.Split(dimmedBase, "\n")
-	var result strings.Builder
-
-	// Center modal vertically and horizontally
-	modalHeight := len(modalLines)
-	verticalPadding := (height - modalHeight) / 2
-	if verticalPadding < 0 {
-		verticalPadding = 0
-	}
-
-	for i := 0; i < len(baseLines); i++ {
-		if i >= verticalPadding && i < verticalPadding+modalHeight {
-			modalLineIdx := i - verticalPadding
-			if modalLineIdx < len(modalLines) {
-				// Center modal horizontally
-				leftPadding := (width - modalWidth) / 2
-				if leftPadding < 0 {
-					leftPadding = 0
-				}
-				result.WriteString(strings.Repeat(" ", leftPadding) + modalLines[modalLineIdx])
-			} else {
-				result.WriteString(baseLines[i])
-			}
-		} else {
-			result.WriteString(baseLines[i])
-		}
-		result.WriteString("\n")
-	}
-
-	return result.String()
+	// Use overlay helper to render modal on dimmed background
+	return overlayModal(baseView, modalContent.String(), width, height, modalWidth)
 }
 
 func (m model) renderError() string {

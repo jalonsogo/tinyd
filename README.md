@@ -40,8 +40,6 @@
 
 ## 🚀 Quick Start
 
-### Installation
-
 ```bash
 # Clone the repository
 git clone https://github.com/jalonsogo/tuik.git
@@ -63,8 +61,6 @@ go build -o tuik
 ## 🎮 Interactive Features
 
 ### Container Management
-Press a key, get instant results:
-
 - **`s`** - Start or stop containers (smart toggle)
 - **`r`** - Restart running containers
 - **`c`** - Open interactive shell with altscreen (preserves TUI state)
@@ -74,16 +70,12 @@ Press a key, get instant results:
 - **`D`** - Delete with confirmation (works across all tabs)
 
 ### Image Operations
-Manage your image library effortlessly:
-
 - **`R`** - Run new containers with interactive modal (name, ports, volumes, env vars)
 - **`i`** - Inspect layers, architecture, and configuration
 - **`D`** - Remove images (with force option)
 - **`f`** - Filter by status: All / In Use / Unused / Dangling
 
 ### Volume Management
-Track volume usage across containers:
-
 - **`i`** - Inspect volume details, see which containers are attached
 - **`D`** - Delete volumes safely
 - **Container column** shows which containers use each volume in real-time
@@ -125,7 +117,7 @@ Network topology at a glance:
 ● app-network     bridge   172.18.0.0/16    local
 ```
 
-## ⌨️ Complete Keyboard Reference
+## ⌨️ Keyboard Reference
 
 ### Navigation
 | Key | Action |
@@ -135,7 +127,6 @@ Network topology at a glance:
 | `←` / `h` | Previous tab |
 | `→` / `l` | Next tab |
 | `1-4` | Jump directly to tab |
-| `Ctrl+D/I/V/N` | Quick tab shortcuts |
 
 ### Universal Actions
 | Key | Action |
@@ -177,8 +168,6 @@ Network topology at a glance:
 
 ## 🔧 Configuration
 
-### Docker Connection
-
 **Local Docker** (default):
 ```bash
 ./tuik
@@ -190,93 +179,16 @@ export DOCKER_HOST=tcp://remote-host:2376
 ./tuik
 ```
 
-**Docker Desktop** (macOS/Windows):
-Automatically detected, just run it!
+**Docker Desktop** (macOS/Windows): Automatically detected!
 
-### Auto-Refresh
-Container stats refresh every 5 seconds automatically. No configuration needed.
+## 📚 Documentation
 
-## 🏗️ Architecture
-
-Built with modern Go tooling:
-
-- **[Bubble Tea](https://github.com/charmbracelet/bubbletea)** - Elegant TUI framework with The Elm Architecture
-- **[Lipgloss](https://github.com/charmbracelet/lipgloss)** - Style definitions for terminal UIs
-- **[Docker Engine API](https://docs.docker.com/engine/api/)** - Official Docker client library
-
-Designed from a **Pencil specification** for pixel-perfect rendering.
-
-## 🎨 Design Philosophy
-
-**Minimalism First**
-- No unnecessary UI elements
-- Information density balanced with readability
-- Clear visual hierarchy through color and spacing
-
-**Keyboard Driven**
-- Every action is one keypress away
-- Vim-style navigation (`hjkl`) supported
-- No mouse required (terminal purist approved)
-
-**Responsive by Default**
-- Fluid column resizing
-- Intelligent text truncation
-- Graceful degradation on small screens
-
-## 📸 Screenshots
-
-```
-╭─ Containers ─╮─ Images ─╮─ Volumes ─╮─ Networks ─╮
-│             │          │           │            │
-─╯             ╰──────────╰───────────╰────────────╰─
-
-● nginx-proxy      RUNNING   2.3%   128MB   nginx:latest        80:8080
-● api-server       RUNNING   15.1%  512MB   node:18-alpine      3000:3000
-● postgres-db      RUNNING   8.7%   256MB   postgres:15         5432:5432
-● redis-cache      RUNNING   0.8%   32MB    redis:alpine        6379:6379
-
-────────────────────────────────────────────────────────────────────────────
-[S]top | [R]estart | [C]onsole | [O]pen in browser | [L]ogs | [I]nspect
-```
-
-## 🐛 Troubleshooting
-
-**Cannot connect to Docker daemon**
-```bash
-# Check if Docker is running
-docker ps
-
-# Verify socket permissions (Linux)
-sudo usermod -aG docker $USER
-newgrp docker
-
-# Check DOCKER_HOST (remote)
-echo $DOCKER_HOST
-```
-
-**Terminal display issues**
-- Ensure your terminal supports Unicode and 256 colors
-- Try a modern terminal: iTerm2, Alacritty, or Windows Terminal
-- Minimum terminal width: 60 columns
-
-**Keyboard shortcuts not working**
-- Check for key binding conflicts with terminal emulator
-- Try alternate keys (e.g., arrow keys instead of hjkl)
-
-## 🤝 Contributing
-
-Contributions are welcome! This project follows standard Go conventions.
-
-```bash
-# Run tests
-go test ./...
-
-# Format code
-go fmt ./...
-
-# Build
-go build -o tuik
-```
+Detailed guides available in the [`docs/`](docs/) folder:
+- [Interactive Features](docs/INTERACTIVE_FEATURES.md)
+- [Console Feature](docs/CONSOLE_FEATURE.md)
+- [Tab Navigation](docs/TAB_NAVIGATION.md)
+- [Architecture](docs/ARCHITECTURE.md)
+- And more...
 
 ## 📜 LOLcense
 

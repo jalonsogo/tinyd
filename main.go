@@ -48,7 +48,8 @@ type Volume struct {
 	Mountpoint string
 	Scope      string
 	Created    string
-	InUse      bool // Whether the volume is mounted to any container
+	InUse      bool   // Whether the volume is mounted to any container
+	Containers string // Comma-separated list of container names using this volume
 }
 
 // Network represents a Docker network
@@ -607,6 +608,34 @@ func fetchVolumes(cli *client.Client) tea.Cmd {
 		}
 
 		ctx := context.Background()
+
+		// First, get all containers to determine which volumes are in use
+		containersResult, err := cli.ContainerList(ctx, client.ContainerListOptions{All: true})
+		if err != nil {
+			return errMsg(err)
+		}
+
+		// Build a map of volume names to container names
+		volumeToContainers := make(map[string][]string)
+		for _, c := range containersResult.Items {
+			// Skip containers without names
+			if len(c.Names) == 0 {
+				continue
+			}
+
+			containerName := c.Names[0]
+			if len(containerName) > 0 && containerName[0] == '/' {
+				containerName = containerName[1:] // Remove leading slash
+			}
+
+			// Check container mounts
+			for _, mount := range c.Mounts {
+				if mount.Type == "volume" {
+					volumeToContainers[mount.Name] = append(volumeToContainers[mount.Name], containerName)
+				}
+			}
+		}
+
 		result, err := cli.VolumeList(ctx, client.VolumeListOptions{})
 		if err != nil {
 			return errMsg(err)
@@ -632,9 +661,13 @@ func fetchVolumes(cli *client.Client) tea.Cmd {
 				}
 			}
 
-			// Determine if volume is in use
+			// Determine if volume is in use and which containers use it
 			inUse := false
-			if vol.UsageData != nil && vol.UsageData.RefCount > 0 {
+			containers := "--"
+			if containerList, ok := volumeToContainers[vol.Name]; ok && len(containerList) > 0 {
+				inUse = true
+				containers = strings.Join(containerList, ", ")
+			} else if vol.UsageData != nil && vol.UsageData.RefCount > 0 {
 				inUse = true
 			}
 
@@ -645,6 +678,7 @@ func fetchVolumes(cli *client.Client) tea.Cmd {
 				Scope:      vol.Scope,
 				Created:    created,
 				InUse:      inUse,
+				Containers: containers,
 			})
 		}
 
@@ -1090,6 +1124,168 @@ func inspectContainer(cli *client.Client, containerID string) tea.Cmd {
 	}
 }
 
+// Inspect image and show layers
+func inspectImage(cli *client.Client, imageID string) tea.Cmd {
+	return func() tea.Msg {
+		if cli == nil {
+			return errMsg(fmt.Errorf("docker client not initialized"))
+		}
+
+		ctx := context.Background()
+		inspectResult, err := cli.ImageInspect(ctx, imageID)
+		if err != nil {
+			return actionErrorMsg(fmt.Sprintf("Failed to inspect image: %v", err))
+		}
+
+		// Format inspect data
+		var b strings.Builder
+
+		// Basic info section
+		b.WriteString("=== IMAGE INFO ===\n")
+		b.WriteString(fmt.Sprintf("ID: %s\n", inspectResult.ID[:19]))
+		if len(inspectResult.RepoTags) > 0 {
+			b.WriteString(fmt.Sprintf("Tags: %s\n", strings.Join(inspectResult.RepoTags, ", ")))
+		}
+		if len(inspectResult.RepoDigests) > 0 {
+			b.WriteString(fmt.Sprintf("Digests: %s\n", strings.Join(inspectResult.RepoDigests, ", ")))
+		}
+		b.WriteString(fmt.Sprintf("Created: %s\n", inspectResult.Created))
+		b.WriteString(fmt.Sprintf("Size: %s\n", units.HumanSize(float64(inspectResult.Size))))
+
+		// Architecture section
+		b.WriteString("\n=== ARCHITECTURE ===\n")
+		b.WriteString(fmt.Sprintf("OS: %s\n", inspectResult.Os))
+		b.WriteString(fmt.Sprintf("Architecture: %s\n", inspectResult.Architecture))
+		if inspectResult.Variant != "" {
+			b.WriteString(fmt.Sprintf("Variant: %s\n", inspectResult.Variant))
+		}
+
+		// Layers section
+		b.WriteString("\n=== LAYERS ===\n")
+		if len(inspectResult.RootFS.Layers) == 0 {
+			b.WriteString("No layers found\n")
+		} else {
+			b.WriteString(fmt.Sprintf("Total layers: %d\n\n", len(inspectResult.RootFS.Layers)))
+			for i, layer := range inspectResult.RootFS.Layers {
+				b.WriteString(fmt.Sprintf("Layer %d:\n", i+1))
+				b.WriteString(fmt.Sprintf("  %s\n\n", layer))
+			}
+		}
+
+		// Config section (entrypoint, cmd, env)
+		if inspectResult.Config != nil {
+			b.WriteString("=== CONFIG ===\n")
+			if len(inspectResult.Config.Entrypoint) > 0 {
+				b.WriteString(fmt.Sprintf("Entrypoint: %s\n", strings.Join(inspectResult.Config.Entrypoint, " ")))
+			}
+			if len(inspectResult.Config.Cmd) > 0 {
+				b.WriteString(fmt.Sprintf("Cmd: %s\n", strings.Join(inspectResult.Config.Cmd, " ")))
+			}
+			if len(inspectResult.Config.Env) > 0 {
+				b.WriteString("\nEnvironment Variables:\n")
+				for _, env := range inspectResult.Config.Env {
+					b.WriteString(fmt.Sprintf("  %s\n", env))
+				}
+			}
+			if len(inspectResult.Config.ExposedPorts) > 0 {
+				b.WriteString("\nExposed Ports:\n")
+				for port := range inspectResult.Config.ExposedPorts {
+					b.WriteString(fmt.Sprintf("  %s\n", port))
+				}
+			}
+		}
+
+		return inspectMsg(b.String())
+	}
+}
+
+// Inspect volume and show details
+func inspectVolume(cli *client.Client, volumeName string) tea.Cmd {
+	return func() tea.Msg {
+		if cli == nil {
+			return errMsg(fmt.Errorf("docker client not initialized"))
+		}
+
+		ctx := context.Background()
+		inspectResult, err := cli.VolumeInspect(ctx, volumeName, client.VolumeInspectOptions{})
+		if err != nil {
+			return actionErrorMsg(fmt.Sprintf("Failed to inspect volume: %v", err))
+		}
+
+		// Format inspect data
+		var b strings.Builder
+
+		vol := inspectResult.Volume
+
+		// Basic info section
+		b.WriteString("=== VOLUME INFO ===\n")
+		b.WriteString(fmt.Sprintf("Name: %s\n", vol.Name))
+		b.WriteString(fmt.Sprintf("Driver: %s\n", vol.Driver))
+		b.WriteString(fmt.Sprintf("Mountpoint: %s\n", vol.Mountpoint))
+		b.WriteString(fmt.Sprintf("Scope: %s\n", vol.Scope))
+		if vol.CreatedAt != "" {
+			b.WriteString(fmt.Sprintf("Created: %s\n", vol.CreatedAt))
+		}
+
+		// Driver options
+		if len(vol.Options) > 0 {
+			b.WriteString("\n=== DRIVER OPTIONS ===\n")
+			for key, value := range vol.Options {
+				b.WriteString(fmt.Sprintf("%s: %s\n", key, value))
+			}
+		}
+
+		// Labels
+		if len(vol.Labels) > 0 {
+			b.WriteString("\n=== LABELS ===\n")
+			for key, value := range vol.Labels {
+				b.WriteString(fmt.Sprintf("%s: %s\n", key, value))
+			}
+		}
+
+		// Usage data
+		if vol.UsageData != nil {
+			b.WriteString("\n=== USAGE ===\n")
+			b.WriteString(fmt.Sprintf("Size: %s\n", units.HumanSize(float64(vol.UsageData.Size))))
+			b.WriteString(fmt.Sprintf("Reference Count: %d\n", vol.UsageData.RefCount))
+		}
+
+		// Find containers using this volume
+		containersResult, err := cli.ContainerList(ctx, client.ContainerListOptions{All: true})
+		if err == nil {
+			var containerNames []string
+			for _, c := range containersResult.Items {
+				for _, mount := range c.Mounts {
+					if mount.Type == "volume" && mount.Name == volumeName {
+						if len(c.Names) == 0 {
+							continue
+						}
+
+						containerName := c.Names[0]
+						if len(containerName) > 0 && containerName[0] == '/' {
+							containerName = containerName[1:] // Remove leading slash
+						}
+						containerNames = append(containerNames, containerName)
+						break
+					}
+				}
+			}
+
+			if len(containerNames) > 0 {
+				b.WriteString("\n=== CONTAINERS USING THIS VOLUME ===\n")
+				for _, name := range containerNames {
+					b.WriteString(fmt.Sprintf("  - %s\n", name))
+				}
+			} else {
+				b.WriteString("\n=== CONTAINERS ===\n")
+				b.WriteString("No containers are using this volume\n")
+			}
+		}
+
+		return inspectMsg(b.String())
+	}
+}
+
 // Delete container
 func deleteContainer(cli *client.Client, containerID, containerName string) tea.Cmd {
 	return func() tea.Msg {
@@ -1428,8 +1624,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		case "i":
-			// Inspect container
+			// Inspect container, image, or volume
 			if m.activeTab == 0 {
+				// Containers tab
 				filteredContainers := filterContainers(m.containers, m.containerFilter)
 				if len(filteredContainers) > 0 && m.selectedRow < len(filteredContainers) {
 					selectedContainer := filteredContainers[m.selectedRow]
@@ -1437,6 +1634,26 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.currentView = viewModeInspect
 					m.inspectMode = 0
 					return m, inspectContainer(m.dockerClient, selectedContainer.ID)
+				}
+			} else if m.activeTab == 1 {
+				// Images tab
+				filteredImages := filterImages(m.images, m.containers, m.imageFilter)
+				if len(filteredImages) > 0 && m.selectedRow < len(filteredImages) {
+					selectedImage := filteredImages[m.selectedRow]
+					m.selectedImage = &selectedImage
+					m.currentView = viewModeInspect
+					m.inspectMode = 0
+					return m, inspectImage(m.dockerClient, selectedImage.ID)
+				}
+			} else if m.activeTab == 2 {
+				// Volumes tab
+				filteredVolumes := filterVolumes(m.volumes, m.containers, m.dockerClient)
+				if len(filteredVolumes) > 0 && m.selectedRow < len(filteredVolumes) {
+					selectedVolume := filteredVolumes[m.selectedRow]
+					m.selectedVolume = &selectedVolume
+					m.currentView = viewModeInspect
+					m.inspectMode = 0
+					return m, inspectVolume(m.dockerClient, selectedVolume.Name)
 				}
 			}
 		case "f":
@@ -2373,10 +2590,12 @@ func (m model) renderImages() string {
 		for i, image := range filteredImages {
 			isSelected := i == m.selectedRow
 
-			// Status dot - green if in use by containers, gray otherwise
+			// Status dot - green if in use, yellow if dangling, gray if unused
 			var statusDot string
-			if isImageInUse(image, m.containers) {
+			if image.InUse {
 				statusDot = greenStyle.Render("●")
+			} else if image.Dangling {
+				statusDot = yellowStyle.Render("●")
 			} else {
 				statusDot = grayStyle.Render("●")
 			}
@@ -2429,7 +2648,7 @@ func (m model) renderImages() string {
 	// Action bar component with responsive width
 	m.actionBar = m.actionBar.SetStatusMessage(m.statusMessage)
 	if m.statusMessage == "" && len(filteredImages) > 0 {
-		actions := " " + renderShortcut("Run") + " | " + renderShortcut("Delete") + " | " + renderShortcut("Pull") + " | " + renderShortcut("Filter")
+		actions := " " + renderShortcut("Run") + " | " + renderShortcut("Inspect") + " | " + renderShortcut("Delete") + " | " + renderShortcut("Pull") + " | " + renderShortcut("Filter")
 		m.actionBar = m.actionBar.SetActions(actions)
 	} else {
 		m.actionBar = m.actionBar.SetActions("")
@@ -2478,28 +2697,28 @@ func (m model) renderVolumes() string {
 	b.WriteString(statusComp.View())
 
 	// Table component with fixed and fill columns
-	// Layout: [empty] [dot] [empty] [name-fill] [empty] [driver-8] [mountpoint-fill] [created-10]
+	// Layout: [empty] [dot] [empty] [name-fill] [empty] [driver-8] [container-fill] [created-10]
 	emptyWidth := 1
 	dotWidth := 1
 	driverWidth := 8
 	createdWidth := 10
 
-	// Calculate separators (7 separators * 2 spaces)
-	numSeparators := 7
+	// Calculate separators (8 separators * 2 spaces)
+	numSeparators := 8
 	separatorWidth := numSeparators * 2
 
 	// Calculate fixed width used
-	fixedWidth := (emptyWidth * 3) + dotWidth + driverWidth + createdWidth + separatorWidth
+	fixedWidth := (emptyWidth * 4) + dotWidth + driverWidth + createdWidth + separatorWidth
 
-	// Remaining width for fill columns (name and mountpoint)
+	// Remaining width for fill columns (name and containers)
 	remainingWidth := width - fixedWidth
 	if remainingWidth < 20 {
 		remainingWidth = 20
 	}
 
-	// Split remaining between name and mountpoint
-	nameWidth := remainingWidth / 2
-	mountWidth := remainingWidth - nameWidth
+	// Split remaining between name and containers (60% name, 40% containers)
+	nameWidth := (remainingWidth * 6) / 10
+	containerWidth := remainingWidth - nameWidth
 
 	headers := []TableHeader{
 		{Label: "", Width: emptyWidth, AlignRight: false},
@@ -2508,7 +2727,8 @@ func (m model) renderVolumes() string {
 		{Label: "Name", Width: nameWidth, AlignRight: false},
 		{Label: "", Width: emptyWidth, AlignRight: false},
 		{Label: "Driver", Width: driverWidth, AlignRight: false},
-		{Label: "Mountpoint", Width: mountWidth, AlignRight: false},
+		{Label: "", Width: emptyWidth, AlignRight: false},
+		{Label: "Container", Width: containerWidth, AlignRight: false},
 		{Label: "Created", Width: createdWidth, AlignRight: false},
 	}
 
@@ -2519,8 +2739,13 @@ func (m model) renderVolumes() string {
 		for i, volume := range filteredVolumes {
 			isSelected := i == m.selectedRow
 
-			// Status dot (gray for now)
-			statusDot := grayStyle.Render("●")
+			// Status dot - green if in use, gray if unused
+			var statusDot string
+			if volume.InUse {
+				statusDot = greenStyle.Render("●")
+			} else {
+				statusDot = grayStyle.Render("●")
+			}
 
 			// Truncate if needed
 			nameCell := volume.Name
@@ -2533,9 +2758,9 @@ func (m model) renderVolumes() string {
 				driverCell = truncateWithEllipsis(volume.Driver, driverWidth)
 			}
 
-			mountCell := volume.Mountpoint
-			if len(volume.Mountpoint) > mountWidth {
-				mountCell = truncateWithEllipsis(volume.Mountpoint, mountWidth)
+			containerCell := volume.Containers
+			if len(volume.Containers) > containerWidth {
+				containerCell = truncateWithEllipsis(volume.Containers, containerWidth)
 			}
 
 			createdCell := volume.Created
@@ -2544,14 +2769,15 @@ func (m model) renderVolumes() string {
 			}
 
 			cells := []string{
-				"",          // Empty column
-				statusDot,   // Status dot
-				"",          // Empty column
-				nameCell,    // Name (fill)
-				"",          // Empty column
-				driverCell,  // Driver (8 columns)
-				mountCell,   // Mountpoint (fill)
-				createdCell, // Created (10 columns)
+				"",             // Empty column
+				statusDot,      // Status dot
+				"",             // Empty column
+				nameCell,       // Name (fill)
+				"",             // Empty column
+				driverCell,     // Driver (8 columns)
+				"",             // Empty column
+				containerCell,  // Container (fill)
+				createdCell,    // Created (10 columns)
 			}
 
 			rows = append(rows, TableRow{
@@ -2570,7 +2796,7 @@ func (m model) renderVolumes() string {
 	// Action bar component with responsive width
 	m.actionBar = m.actionBar.SetStatusMessage(m.statusMessage)
 	if m.statusMessage == "" && len(filteredVolumes) > 0 {
-		actions := " " + renderShortcut("Delete") + " | " + renderShortcut("Filter")
+		actions := " " + renderShortcut("Inspect") + " | " + renderShortcut("Delete") + " | " + renderShortcut("Filter")
 		m.actionBar = m.actionBar.SetActions(actions)
 	} else {
 		m.actionBar = m.actionBar.SetActions("")
@@ -2660,8 +2886,13 @@ func (m model) renderNetworks() string {
 		for i, network := range filteredNetworks {
 			isSelected := i == m.selectedRow
 
-			// Status dot (gray for now)
-			statusDot := grayStyle.Render("●")
+			// Status dot - green if in use, gray if unused
+			var statusDot string
+			if network.InUse {
+				statusDot = greenStyle.Render("●")
+			} else {
+				statusDot = grayStyle.Render("●")
+			}
 
 			// Truncate if needed
 			nameCell := network.Name
@@ -2748,9 +2979,18 @@ func (m model) renderLogs() string {
 }
 
 func (m model) renderInspect() string {
-	containerName := "Container"
+	// Determine what we're inspecting
+	resourceName := "Resource"
 	if m.selectedContainer != nil {
-		containerName = m.selectedContainer.Name
+		resourceName = m.selectedContainer.Name
+	} else if m.selectedImage != nil {
+		if m.selectedImage.Repository != "<none>" {
+			resourceName = fmt.Sprintf("%s:%s", m.selectedImage.Repository, m.selectedImage.Tag)
+		} else {
+			resourceName = m.selectedImage.ID[:12]
+		}
+	} else if m.selectedVolume != nil {
+		resourceName = m.selectedVolume.Name
 	}
 
 	width := m.width
@@ -2758,7 +2998,7 @@ func (m model) renderInspect() string {
 		width = 60
 	}
 
-	title := fmt.Sprintf("Inspect: %s", containerName)
+	title := fmt.Sprintf("Inspect: %s", resourceName)
 	detailView := NewDetailViewComponent(title, 15).WithWidth(width)
 	detailView = detailView.SetContent(m.inspectContent)
 	detailView = detailView.SetScroll(0)

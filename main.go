@@ -3817,12 +3817,6 @@ func (m model) renderStopConfirm() string {
 		containerName = m.selectedContainer.Name
 	}
 
-	// Dim the base view
-	dimStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#666666"))
-
-	dimmedBase := dimStyle.Render(baseView)
-
 	// Modal dimensions
 	modalWidth := 50
 	if modalWidth > width-10 {
@@ -3833,14 +3827,15 @@ func (m model) renderStopConfirm() string {
 	var modalContent strings.Builder
 
 	borderColor := lipgloss.Color("#666666")
+	modalBg := lipgloss.Color("#0a0a0a")
 	textColor := lipgloss.Color("#CCCCCC")
 	warningColor := lipgloss.Color("#FFFFFF")
 	subTextColor := lipgloss.Color("#999999")
 
-	borderStyle := lipgloss.NewStyle().Foreground(borderColor)
-	textStyle := lipgloss.NewStyle().Foreground(textColor)
-	warningStyle := lipgloss.NewStyle().Foreground(warningColor)
-	subStyle := lipgloss.NewStyle().Foreground(subTextColor)
+	borderStyle := lipgloss.NewStyle().Foreground(borderColor).Background(modalBg)
+	textStyle := lipgloss.NewStyle().Foreground(textColor).Background(modalBg)
+	warningStyle := lipgloss.NewStyle().Foreground(warningColor).Background(modalBg)
+	subStyle := lipgloss.NewStyle().Foreground(subTextColor).Background(modalBg)
 
 	// Calculate inner width
 	innerWidth := modalWidth - 4
@@ -3851,13 +3846,13 @@ func (m model) renderStopConfirm() string {
 	// Title
 	title := " ⚠ Stop Container"
 	titlePadding := innerWidth - len(title) + 2
-	modalContent.WriteString(borderStyle.Render("│") + textStyle.Render(title) + strings.Repeat(" ", titlePadding) + borderStyle.Render("│") + "\n")
+	modalContent.WriteString(borderStyle.Render("│") + textStyle.Render(title) + textStyle.Render(strings.Repeat(" ", titlePadding)) + borderStyle.Render("│") + "\n")
 
 	// Divider
 	modalContent.WriteString(borderStyle.Render("├" + strings.Repeat("─", innerWidth+2) + "┤") + "\n")
 
 	// Empty line
-	modalContent.WriteString(borderStyle.Render("│") + strings.Repeat(" ", innerWidth+2) + borderStyle.Render("│") + "\n")
+	modalContent.WriteString(borderStyle.Render("│") + textStyle.Render(strings.Repeat(" ", innerWidth+2)) + borderStyle.Render("│") + "\n")
 
 	// Warning message
 	warningText := fmt.Sprintf(" Stop container '%s'?", containerName)
@@ -3865,56 +3860,27 @@ func (m model) renderStopConfirm() string {
 		warningText = warningText[:innerWidth-2] + "..."
 	}
 	warningPadding := innerWidth - len(warningText) + 2
-	modalContent.WriteString(borderStyle.Render("│") + warningStyle.Render(warningText) + strings.Repeat(" ", warningPadding) + borderStyle.Render("│") + "\n")
+	modalContent.WriteString(borderStyle.Render("│") + warningStyle.Render(warningText) + textStyle.Render(strings.Repeat(" ", warningPadding)) + borderStyle.Render("│") + "\n")
 
 	// Sub text
 	subText := " This will stop the running container."
 	subPadding := innerWidth - len(subText) + 2
-	modalContent.WriteString(borderStyle.Render("│") + subStyle.Render(subText) + strings.Repeat(" ", subPadding) + borderStyle.Render("│") + "\n")
+	modalContent.WriteString(borderStyle.Render("│") + subStyle.Render(subText) + textStyle.Render(strings.Repeat(" ", subPadding)) + borderStyle.Render("│") + "\n")
 
 	// Empty line
-	modalContent.WriteString(borderStyle.Render("│") + strings.Repeat(" ", innerWidth+2) + borderStyle.Render("│") + "\n")
+	modalContent.WriteString(borderStyle.Render("│") + textStyle.Render(strings.Repeat(" ", innerWidth+2)) + borderStyle.Render("│") + "\n")
 
 	// Footer with keyboard shortcuts
 	footerText := " " + renderShortcut("Enter") + " confirm-stop, " + renderShortcut("Esc") + " exit"
 	footerClean := " Enter confirm-stop, Esc exit"
 	footerPadding := innerWidth - len(footerClean) + 2
-	modalContent.WriteString(borderStyle.Render("│") + footerText + strings.Repeat(" ", footerPadding) + borderStyle.Render("│") + "\n")
+	modalContent.WriteString(borderStyle.Render("│") + footerText + textStyle.Render(strings.Repeat(" ", footerPadding)) + borderStyle.Render("│") + "\n")
 
 	// Bottom border
-	modalContent.WriteString(borderStyle.Render("╰" + strings.Repeat("─", innerWidth+2) + "╯"))
+	modalContent.WriteString(borderStyle.Render("╰" + strings.Repeat("─", innerWidth+2) + "╯") + "\n")
 
-	modal := modalContent.String()
-
-	// Create layers
-	baseLayer := lipgloss.NewStyle().
-		Width(width).
-		Height(height).
-		Render(dimmedBase)
-
-	modalPlaced := lipgloss.Place(
-		width, height,
-		lipgloss.Center, lipgloss.Center,
-		modal,
-		lipgloss.WithWhitespaceChars(" "),
-		lipgloss.WithWhitespaceForeground(lipgloss.NoColor{}),
-	)
-
-	// Composite the layers
-	baseLines := strings.Split(baseLayer, "\n")
-	modalLines := strings.Split(modalPlaced, "\n")
-
-	var result strings.Builder
-	for i := 0; i < len(baseLines) && i < len(modalLines); i++ {
-		if strings.TrimSpace(modalLines[i]) != "" {
-			result.WriteString(modalLines[i])
-		} else {
-			result.WriteString(baseLines[i])
-		}
-		result.WriteString("\n")
-	}
-
-	return result.String()
+	// Use overlay helper to render modal on dimmed background
+	return overlayModal(baseView, modalContent.String(), width, height, modalWidth)
 }
 
 func (m model) renderPullImageModal() string {

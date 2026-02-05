@@ -74,6 +74,7 @@ type VolumeListMsg []Volume
 type NetworkListMsg []Network
 type ErrMsg error
 type TickMsg time.Time
+type AnimationTickMsg time.Time
 type ActionSuccessMsg string
 type ActionErrorMsg string
 type LogsMsg string

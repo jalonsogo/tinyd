@@ -15,6 +15,13 @@ func tickCmd() tea.Cmd {
 	})
 }
 
+// animationTickCmd creates a fast tick for status animations
+func animationTickCmd() tea.Cmd {
+	return tea.Tick(200*time.Millisecond, func(t time.Time) tea.Msg {
+		return types.AnimationTickMsg(t)
+	})
+}
+
 // fetchContainersCmd fetches containers from Docker
 func (m *Model) fetchContainersCmd() tea.Cmd {
 	return func() tea.Msg {

@@ -35,6 +35,7 @@ type Model struct {
 	statusMessage    string
 	actionInProgress bool
 	err              error
+	animationFrame   int // For animated status indicators
 
 	// View mode
 	currentView types.ViewMode
@@ -149,5 +150,6 @@ func (m *Model) Init() tea.Cmd {
 		m.fetchVolumesCmd(),
 		m.fetchNetworksCmd(),
 		tickCmd(),
+		animationTickCmd(),
 	)
 }

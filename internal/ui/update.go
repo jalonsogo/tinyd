@@ -85,6 +85,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			)
 		}
 		return m, tickCmd()
+
+	case types.AnimationTickMsg:
+		// Update animation frame for status indicators
+		m.animationFrame = (m.animationFrame + 1) % 4
+		return m, animationTickCmd()
 	}
 
 	return m, nil
@@ -95,11 +100,16 @@ func (m *Model) handleResize(msg tea.WindowSizeMsg) (tea.Model, tea.Cmd) {
 	m.width = msg.Width
 	m.height = msg.Height
 
-	// Calculate viewport height
-	fixedLines := 8 // tabs + header + action bar
+	// Calculate viewport height for scrollable content
+	// Fixed UI elements:
+	// - Tabs: 4 lines
+	// - Table header: 2 lines
+	// - Action bar: 3 lines
+	// - Buffer: 1 line
+	fixedLines := 10
 	m.viewportHeight = msg.Height - fixedLines
-	if m.viewportHeight < 5 {
-		m.viewportHeight = 5
+	if m.viewportHeight < 3 {
+		m.viewportHeight = 3 // Minimum 3 visible rows
 	}
 
 	// Update component dimensions
@@ -107,6 +117,18 @@ func (m *Model) handleResize(msg tea.WindowSizeMsg) (tea.Model, tea.Cmd) {
 	m.tabs = m.tabs.WithWidth(m.width)
 	m.actionBar = m.actionBar.WithWidth(m.width)
 	m.detailView = m.detailView.WithWidth(m.width)
+
+	// Keep scroll position valid after resize
+	maxRow := m.getMaxRow()
+	if m.selectedRow >= maxRow && maxRow > 0 {
+		m.selectedRow = maxRow - 1
+	}
+	if m.scrollOffset > maxRow-m.viewportHeight && maxRow > m.viewportHeight {
+		m.scrollOffset = maxRow - m.viewportHeight
+	}
+	if m.scrollOffset < 0 {
+		m.scrollOffset = 0
+	}
 
 	return m, nil
 }
@@ -168,7 +190,7 @@ func (m *Model) handleListViewKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case "left", "h", "1", "2", "3", "4":
+	case "left", "h", "right", "l", "1", "2", "3", "4":
 		return m.handleTabSwitch(key)
 
 	case "enter":
@@ -199,6 +221,11 @@ func (m *Model) handleTabSwitch(key string) (tea.Model, tea.Cmd) {
 		m.activeTab--
 		if m.activeTab < 0 {
 			m.activeTab = 3
+		}
+	case "right", "l":
+		m.activeTab++
+		if m.activeTab > 3 {
+			m.activeTab = 0
 		}
 	case "1":
 		m.activeTab = 0

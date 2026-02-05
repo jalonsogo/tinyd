@@ -87,7 +87,8 @@ func (t TabsComponent) SetActiveTab(index int) TabsComponent {
 func (t TabsComponent) View() string {
 	var b strings.Builder
 
-	borderColor := lipgloss.Color("#303030")
+	borderColor := lipgloss.Color("#999999")
+	activeBorderColor := lipgloss.Color("#FFFFFF") // Brighter border for active tab
 	activeColor := lipgloss.Color("#FFFFFF")
 	inactiveColor := lipgloss.Color("#666666")
 
@@ -95,16 +96,24 @@ func (t TabsComponent) View() string {
 		Foreground(borderColor).
 		Background(bgColor)
 
+	activeBorderStyle := lipgloss.NewStyle().
+		Foreground(activeBorderColor).
+		Background(bgColor)
+
 	// Top row with rounded corners
 	b.WriteString(" ")
-	for _, tab := range t.tabs {
+	for i, tab := range t.tabs {
 		tabText := fmt.Sprintf(" %s ", tab.Name)
 		tabWidth := len(tabText)
 
-		// Top border with rounded corners
-		b.WriteString(borderStyle.Render("╭"))
-		b.WriteString(borderStyle.Render(strings.Repeat("─", tabWidth)))
-		b.WriteString(borderStyle.Render("╮"))
+		// Top border with rounded corners (use bright border for active tab)
+		style := borderStyle
+		if i == t.activeTab {
+			style = activeBorderStyle
+		}
+		b.WriteString(style.Render("╭"))
+		b.WriteString(style.Render(strings.Repeat("─", tabWidth)))
+		b.WriteString(style.Render("╮"))
 	}
 	b.WriteString("\n")
 
@@ -113,8 +122,14 @@ func (t TabsComponent) View() string {
 	for i, tab := range t.tabs {
 		tabText := fmt.Sprintf(" %s ", tab.Name)
 
+		// Border style (use bright border for active tab)
+		bStyle := borderStyle
+		if i == t.activeTab {
+			bStyle = activeBorderStyle
+		}
+
 		// Left border
-		b.WriteString(borderStyle.Render("│"))
+		b.WriteString(bStyle.Render("│"))
 
 		// Tab text
 		textStyle := lipgloss.NewStyle().
@@ -129,7 +144,7 @@ func (t TabsComponent) View() string {
 		b.WriteString(textStyle.Render(tabText))
 
 		// Right border
-		b.WriteString(borderStyle.Render("│"))
+		b.WriteString(bStyle.Render("│"))
 	}
 	b.WriteString("\n")
 
@@ -140,10 +155,10 @@ func (t TabsComponent) View() string {
 		tabWidth := len(tabText)
 
 		if i == t.activeTab {
-			// Active tab: no bottom border (open to content)
-			b.WriteString(borderStyle.Render("╯"))
+			// Active tab: no bottom border (open to content), use bright border
+			b.WriteString(activeBorderStyle.Render("╯"))
 			b.WriteString(strings.Repeat(" ", tabWidth))
-			b.WriteString(borderStyle.Render("╰"))
+			b.WriteString(activeBorderStyle.Render("╰"))
 		} else {
 			// Inactive tab: bottom border connects to line
 			b.WriteString(borderStyle.Render("┴"))
@@ -262,12 +277,12 @@ func (t TableComponent) View() string {
 	var b strings.Builder
 
 	headerStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#999999")).
+		Foreground(lipgloss.Color("#CCCCCC")).
 		Background(lipgloss.Color("#0a0a0a")).
 		Bold(true)
 
 	normalCellStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#666666")).
+		Foreground(lipgloss.Color("#999999")).
 		Background(lipgloss.Color("#0a0a0a"))
 
 	selectedCellStyle := lipgloss.NewStyle().
@@ -275,7 +290,7 @@ func (t TableComponent) View() string {
 		Background(lipgloss.Color("#0a0a0a"))
 
 	lineStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#303030")).
+		Foreground(lipgloss.Color("#999999")).
 		Background(lipgloss.Color("#0a0a0a"))
 
 	// Table headers
@@ -332,8 +347,8 @@ func (t TableComponent) View() string {
 				// Normal row rendering
 				for j, cell := range row.Cells {
 					if j < len(t.headers) {
-						// Second column (index 1) is the status dot - render as-is without styling
-						if j == 1 && strings.Contains(cell, "●") {
+						// First column (index 0) is the status dot - render as-is without styling
+						if j == 0 && (strings.Contains(cell, "●") || strings.Contains(cell, "○") || strings.Contains(cell, "◌") || strings.Contains(cell, "◴") || strings.Contains(cell, "◷") || strings.Contains(cell, "◶") || strings.Contains(cell, "◵")) {
 							b.WriteString(cell)
 							if t.headers[j].Width > 1 {
 								b.WriteString(normalCellStyle.Render(strings.Repeat(" ", t.headers[j].Width-1)))
@@ -406,7 +421,7 @@ func (a ActionBarComponent) View() string {
 	var b strings.Builder
 
 	lineStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#303030")).
+		Foreground(lipgloss.Color("#999999")).
 		Background(lipgloss.Color("#0a0a0a"))
 
 	statusStyle := lipgloss.NewStyle().
@@ -486,15 +501,15 @@ func (d DetailViewComponent) View() string {
 		Bold(true)
 
 	helpStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#666666")).
+		Foreground(lipgloss.Color("#999999")).
 		Background(lipgloss.Color("#0a0a0a"))
 
 	lineStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#303030")).
+		Foreground(lipgloss.Color("#999999")).
 		Background(lipgloss.Color("#0a0a0a"))
 
 	contentStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#666666")).
+		Foreground(lipgloss.Color("#999999")).
 		Background(lipgloss.Color("#0a0a0a"))
 
 	loadingStyle := lipgloss.NewStyle().

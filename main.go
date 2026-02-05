@@ -2316,7 +2316,7 @@ func (m model) handlePullModalInput(msg tea.KeyMsg) tea.Cmd {
 }
 
 // Handle input in the Search modal
-func (m model) handleSearchModalInput(msg tea.KeyMsg) tea.Cmd {
+func (m *model) handleSearchModalInput(msg tea.KeyMsg) tea.Cmd {
 	key := msg.String()
 
 	switch key {

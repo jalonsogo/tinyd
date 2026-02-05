@@ -198,7 +198,7 @@ Detailed guides available in the [`docs/`](docs/) folder:
 
 **All rights reserved.**
 
-For {root} sake I'm a designer. Mostly all the code has been written by chatGPT and ad latere.
+For {root} sake I'm a designer. Mostly all the code has been written by Claude and ad latere.
 
 ## 🙏 Acknowledgments
 

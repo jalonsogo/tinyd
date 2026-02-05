@@ -3177,17 +3177,49 @@ func (m model) renderLogs() string {
 	helpStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#666666"))
 
-	// Build header bar with full-width blue background
+	// Pre-calculate scroll info for the header
+	logLines := strings.Split(m.logsContent, "\n")
+	var filteredLines []string
+	if m.logsSearchMode && m.logsSearchQuery != "" {
+		query := strings.ToLower(m.logsSearchQuery)
+		for _, line := range logLines {
+			if strings.Contains(strings.ToLower(line), query) {
+				filteredLines = append(filteredLines, line)
+			}
+		}
+	} else {
+		filteredLines = logLines
+	}
+
+	// Calculate available height (no action bar now, so 5 lines overhead)
+	availableLines := m.height - 5
+	if availableLines < 5 {
+		availableLines = 5
+	}
+
+	// Calculate scroll position
+	end := m.logsScrollOffset + availableLines
+	if end > len(filteredLines) {
+		end = len(filteredLines)
+	}
+
+	// Build header bar with all information
 	titleText := fmt.Sprintf("  Logs: %s  ", containerName)
 	var searchText string
 	if m.logsSearchMode {
 		searchInput := "Search: " + m.logsSearchQuery + "█"
-		searchText = "[" + searchInput + "]"
+		searchText = "[" + searchInput + "]  "
 	} else {
-		// Render: " [Search]" with S highlighted in yellow
-		searchText = "[Search]"
+		searchText = "[Search]  "
 	}
-	headerRight := "  [ESC] Back  "
+
+	// Add shortcuts and scroll info on the right
+	var headerRight string
+	if len(filteredLines) > availableLines {
+		headerRight = fmt.Sprintf("[S]earch | [ESC] Back | %d-%d of %d lines  ", m.logsScrollOffset+1, end, len(filteredLines))
+	} else {
+		headerRight = "[S]earch | [ESC] Back  "
+	}
 
 	// Build full-width header with blue background
 	headerContent := titleText + searchText
@@ -3207,32 +3239,6 @@ func (m model) renderLogs() string {
 	b.WriteString(lineStyle.Render(strings.Repeat("─", width)))
 	b.WriteString("\n")
 
-	// Filter logs if search is active
-	logLines := strings.Split(m.logsContent, "\n")
-	var filteredLines []string
-	if m.logsSearchMode && m.logsSearchQuery != "" {
-		query := strings.ToLower(m.logsSearchQuery)
-		for _, line := range logLines {
-			if strings.Contains(strings.ToLower(line), query) {
-				filteredLines = append(filteredLines, line)
-			}
-		}
-	} else {
-		filteredLines = logLines
-	}
-
-	// Calculate available height accounting for all UI elements:
-	// - header (0 lines, empty)
-	// - tabs (3 lines)
-	// - logs title + search (1 line)
-	// - divider (1 line)
-	// - action bar (2 lines)
-	// Total UI overhead: ~7 lines
-	availableLines := m.height - 7
-	if availableLines < 5 {
-		availableLines = 5
-	}
-
 	// Ensure scroll offset is within bounds
 	maxScroll := len(filteredLines) - availableLines
 	if maxScroll < 0 {
@@ -3240,12 +3246,6 @@ func (m model) renderLogs() string {
 	}
 	if m.logsScrollOffset > maxScroll {
 		m.logsScrollOffset = maxScroll
-	}
-
-	// Display logs with scrolling
-	end := m.logsScrollOffset + availableLines
-	if end > len(filteredLines) {
-		end = len(filteredLines)
 	}
 
 	if len(filteredLines) == 0 {
@@ -3264,22 +3264,6 @@ func (m model) renderLogs() string {
 			b.WriteString("\n")
 		}
 	}
-
-	// Action bar component with responsive width
-	m.actionBar = m.actionBar.SetStatusMessage(m.statusMessage)
-	if m.statusMessage == "" {
-		// Show scroll indicator and search help
-		scrollInfo := ""
-		if len(filteredLines) > availableLines {
-			scrollInfo = fmt.Sprintf(" [%d-%d of %d lines]", m.logsScrollOffset+1, end, len(filteredLines))
-		}
-		actions := " " + renderShortcut("Search (S)") + " | " + renderShortcut("Back (ESC)") + scrollInfo
-		m.actionBar = m.actionBar.SetActions(actions)
-	} else {
-		m.actionBar = m.actionBar.SetActions("")
-	}
-	actionBar := m.actionBar.WithWidth(width)
-	b.WriteString(actionBar.View())
 
 	return containerStyle.Render(b.String())
 }

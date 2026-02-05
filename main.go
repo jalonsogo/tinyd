@@ -2829,7 +2829,7 @@ func (m model) renderImages() string {
 	// Action bar component with responsive width
 	m.actionBar = m.actionBar.SetStatusMessage(m.statusMessage)
 	if m.statusMessage == "" && len(filteredImages) > 0 {
-		actions := " " + renderShortcut("Run") + " | " + renderShortcut("Inspect") + " | " + renderShortcut("Delete") + " | " + renderShortcut("Pull") + " | " + renderShortcut("Filter")
+		actions := " " + renderShortcut("Run") + " | " + renderShortcut("Inspect") + " | " + renderShortcut("Delete") + " | " + renderShortcut("Pull")
 		m.actionBar = m.actionBar.SetActions(actions)
 	} else {
 		m.actionBar = m.actionBar.SetActions("")
@@ -2977,7 +2977,7 @@ func (m model) renderVolumes() string {
 	// Action bar component with responsive width
 	m.actionBar = m.actionBar.SetStatusMessage(m.statusMessage)
 	if m.statusMessage == "" && len(filteredVolumes) > 0 {
-		actions := " " + renderShortcut("Inspect") + " | " + renderShortcut("Delete") + " | " + renderShortcut("Filter")
+		actions := " " + renderShortcut("Inspect") + " | " + renderShortcut("Delete")
 		m.actionBar = m.actionBar.SetActions(actions)
 	} else {
 		m.actionBar = m.actionBar.SetActions("")
@@ -3129,7 +3129,7 @@ func (m model) renderNetworks() string {
 	// Action bar component with responsive width
 	m.actionBar = m.actionBar.SetStatusMessage(m.statusMessage)
 	if m.statusMessage == "" && len(filteredNetworks) > 0 {
-		actions := " " + renderShortcut("Delete") + " | " + renderShortcut("Filter")
+		actions := " " + renderShortcut("Inspect") + " | " + renderShortcut("Delete")
 		m.actionBar = m.actionBar.SetActions(actions)
 	} else {
 		m.actionBar = m.actionBar.SetActions("")

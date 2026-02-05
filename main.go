@@ -88,6 +88,7 @@ const (
 	viewModeRunImage
 	viewModeDeleteConfirm
 	viewModePullImage
+	viewModeSearch
 )
 
 // Filter types for each tab
@@ -189,6 +190,11 @@ type model struct {
 	// Pull image modal
 	pullImageName string
 
+	// Global search modal
+	searchQuery string
+	searchResults []SearchResult
+	searchSelectedIdx int
+
 	// Delete confirmation
 	selectedVolume *Volume
 	selectedNetwork *Network
@@ -218,6 +224,15 @@ type VolumeMapping struct {
 type EnvVar struct {
 	Key   string
 	Value string
+}
+
+// SearchResult for global search
+type SearchResult struct {
+	Type   string // "container", "image", "volume", "network"
+	Name   string
+	ID     string
+	TabIdx int
+	RowIdx int
 }
 
 // Color palette matching the Pencil design
@@ -1492,6 +1507,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else if m.currentView == viewModePullImage {
 			// Pull image modal - allow text input
 			return m, m.handlePullModalInput(msg)
+		} else if m.currentView == viewModeSearch {
+			// Global search modal - allow text input
+			return m, m.handleSearchModalInput(msg)
 		} else if m.currentView == viewModeLogs && m.logsSearchMode {
 			// Logs search mode - handle text input
 			key := msg.String()
@@ -1834,6 +1852,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.filterOptions = []string{"All", "In Use", "Unused"}
 					m.selectedFilter = m.networkFilter
 				}
+			}
+		case "/":
+			// Open global search modal
+			if m.currentView == viewModeList {
+				m.currentView = viewModeSearch
+				m.searchQuery = ""
+				m.searchResults = []SearchResult{}
+				m.searchSelectedIdx = 0
 			}
 		case "d", "D":
 			// Delete selected resource (works on all tabs)
@@ -2289,6 +2315,138 @@ func (m model) handlePullModalInput(msg tea.KeyMsg) tea.Cmd {
 	return nil
 }
 
+// Handle input in the Search modal
+func (m model) handleSearchModalInput(msg tea.KeyMsg) tea.Cmd {
+	key := msg.String()
+
+	switch key {
+	case "esc":
+		// Exit modal
+		m.currentView = viewModeList
+		m.searchQuery = ""
+		m.searchResults = []SearchResult{}
+		m.searchSelectedIdx = 0
+		return nil
+
+	case "enter":
+		// Jump to selected result
+		if len(m.searchResults) > 0 && m.searchSelectedIdx < len(m.searchResults) {
+			result := m.searchResults[m.searchSelectedIdx]
+			m.activeTab = result.TabIdx
+			m.selectedRow = result.RowIdx
+			m.scrollOffset = result.RowIdx
+			m.currentView = viewModeList
+			m.searchQuery = ""
+			m.searchResults = []SearchResult{}
+			m.searchSelectedIdx = 0
+		}
+		return nil
+
+	case "up", "k":
+		// Navigate up in results
+		if m.searchSelectedIdx > 0 {
+			m.searchSelectedIdx--
+		}
+
+	case "down", "j":
+		// Navigate down in results
+		if m.searchSelectedIdx < len(m.searchResults)-1 {
+			m.searchSelectedIdx++
+		}
+
+	case "backspace":
+		// Delete character from search query
+		if len(m.searchQuery) > 0 {
+			m.searchQuery = m.searchQuery[:len(m.searchQuery)-1]
+			// Perform search with updated query
+			m.performFuzzySearch()
+			m.searchSelectedIdx = 0
+		}
+
+	default:
+		// Add character to search query (only if it's a single character)
+		if len(key) == 1 {
+			m.searchQuery += key
+			// Perform search with updated query
+			m.performFuzzySearch()
+			m.searchSelectedIdx = 0
+		}
+	}
+
+	return nil
+}
+
+// Perform fuzzy search across all resources
+func (m *model) performFuzzySearch() {
+	m.searchResults = []SearchResult{}
+	if m.searchQuery == "" {
+		return
+	}
+
+	query := strings.ToLower(m.searchQuery)
+
+	// Search containers
+	filteredContainers := filterContainers(m.containers, containerFilterAll)
+	for i, container := range filteredContainers {
+		if strings.Contains(strings.ToLower(container.Name), query) ||
+			strings.Contains(strings.ToLower(container.ID), query) ||
+			strings.Contains(strings.ToLower(container.Image), query) {
+			m.searchResults = append(m.searchResults, SearchResult{
+				Type:   "container",
+				Name:   container.Name,
+				ID:     container.ID,
+				TabIdx: 0,
+				RowIdx: i,
+			})
+		}
+	}
+
+	// Search images
+	filteredImages := filterImages(m.images, m.containers, imageFilterAll)
+	for i, image := range filteredImages {
+		imageName := image.Repository + ":" + image.Tag
+		if strings.Contains(strings.ToLower(imageName), query) ||
+			strings.Contains(strings.ToLower(image.ID), query) {
+			m.searchResults = append(m.searchResults, SearchResult{
+				Type:   "image",
+				Name:   imageName,
+				ID:     image.ID,
+				TabIdx: 1,
+				RowIdx: i,
+			})
+		}
+	}
+
+	// Search volumes
+	filteredVolumes := filterVolumes(m.volumes, m.containers, m.dockerClient)
+	for i, volume := range filteredVolumes {
+		if strings.Contains(strings.ToLower(volume.Name), query) {
+			m.searchResults = append(m.searchResults, SearchResult{
+				Type:   "volume",
+				Name:   volume.Name,
+				ID:     volume.Name,
+				TabIdx: 2,
+				RowIdx: i,
+			})
+		}
+	}
+
+	// Search networks
+	filteredNetworks := filterNetworks(m.networks, m.containers, m.dockerClient)
+	for i, network := range filteredNetworks {
+		if strings.Contains(strings.ToLower(network.Name), query) ||
+			strings.Contains(strings.ToLower(network.ID), query) {
+			m.searchResults = append(m.searchResults, SearchResult{
+				Type:   "network",
+				Name:   network.Name,
+				ID:     network.ID,
+				TabIdx: 3,
+				RowIdx: i,
+			})
+		}
+	}
+}
+
 // Get max row count for current tab (accounting for filters)
 func (m model) getMaxRow() int {
 	switch m.activeTab {
@@ -2509,6 +2667,8 @@ func (m model) View() string {
 		return m.renderRunImageModal()
 	case viewModePullImage:
 		return m.renderPullImageModal()
+	case viewModeSearch:
+		return m.renderSearchModal()
 	case viewModeDeleteConfirm:
 		return m.renderDeleteConfirm()
 	}
@@ -3765,6 +3925,203 @@ func (m model) renderPullImageModal() string {
 
 	// Controls
 	controls := "  [Enter] Pull   [ESC] Cancel"
+	modalContent.WriteString(borderStyle.Render("│") + " " + labelStyle.Render(controls) +
+		strings.Repeat(" ", innerWidth+1-len(controls)) + borderStyle.Render("│") + "\n")
+
+	// Bottom border
+	modalContent.WriteString(borderStyle.Render("╰" + strings.Repeat("─", innerWidth+2) + "╯") + "\n")
+
+	// Split into lines
+	modalLines := strings.Split(modalContent.String(), "\n")
+
+	// Calculate vertical position (center)
+	modalHeight := len(modalLines)
+	topPadding := (height - modalHeight) / 2
+	if topPadding < 0 {
+		topPadding = 0
+	}
+
+	// Overlay modal on dimmed base
+	baseLines := strings.Split(dimmedBase, "\n")
+	var result strings.Builder
+
+	for i := 0; i < height; i++ {
+		if i >= topPadding && i < topPadding+modalHeight {
+			modalLineIdx := i - topPadding
+			if modalLineIdx < len(modalLines) {
+				// Overlay modal on the base line
+				leftPadding := (width - modalWidth) / 2
+				if leftPadding < 0 {
+					leftPadding = 0
+				}
+
+				if i < len(baseLines) {
+					baseLine := baseLines[i]
+					// Simply place modal at the calculated position, background is already dimmed
+					if leftPadding > 0 && len(baseLine) > leftPadding {
+						result.WriteString(baseLine[:leftPadding] + modalLines[modalLineIdx])
+					} else {
+						result.WriteString(strings.Repeat(" ", leftPadding) + modalLines[modalLineIdx])
+					}
+				} else {
+					result.WriteString(strings.Repeat(" ", leftPadding) + modalLines[modalLineIdx])
+				}
+			} else {
+				if i < len(baseLines) {
+					result.WriteString(baseLines[i])
+				}
+			}
+		} else if i < len(baseLines) {
+			result.WriteString(baseLines[i])
+		}
+		result.WriteString("\n")
+	}
+
+	return result.String()
+}
+
+func (m model) renderSearchModal() string {
+	// Use responsive dimensions
+	width := m.width
+	if width < 80 {
+		width = 80
+	}
+	height := m.height
+	if height < 20 {
+		height = 20
+	}
+
+	// Render base view (current tab)
+	var baseView string
+	switch m.activeTab {
+	case 0:
+		baseView = m.renderContainers()
+	case 1:
+		baseView = m.renderImages()
+	case 2:
+		baseView = m.renderVolumes()
+	case 3:
+		baseView = m.renderNetworks()
+	}
+
+	// Dim the base view
+	dimStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#666666"))
+
+	dimmedBase := dimStyle.Render(baseView)
+
+	// Modal dimensions - make it wide for search results
+	modalWidth := width - 20
+	if modalWidth > 100 {
+		modalWidth = 100
+	}
+	if modalWidth < 60 {
+		modalWidth = 60
+	}
+
+	// Build modal with box-drawing characters
+	var modalContent strings.Builder
+
+	borderColor := lipgloss.Color("#666666")
+	textColor := lipgloss.Color("#CCCCCC")
+	labelColor := lipgloss.Color("#999999")
+	inputColor := lipgloss.Color("#FFFFFF")
+	selectedColor := lipgloss.Color("#00FF00")
+
+	borderStyle := lipgloss.NewStyle().Foreground(borderColor)
+	textStyle := lipgloss.NewStyle().Foreground(textColor)
+	labelStyle := lipgloss.NewStyle().Foreground(labelColor)
+	inputStyle := lipgloss.NewStyle().Foreground(inputColor)
+	selectedStyle := lipgloss.NewStyle().Foreground(selectedColor).Bold(true)
+
+	// Calculate inner width
+	innerWidth := modalWidth - 4
+
+	// Top border
+	modalContent.WriteString(borderStyle.Render("╭" + strings.Repeat("─", innerWidth+2) + "╮") + "\n")
+
+	// Title
+	title := " Global Search "
+	titlePadding := (innerWidth + 2 - len(title)) / 2
+	modalContent.WriteString(borderStyle.Render("│") + strings.Repeat(" ", titlePadding) +
+		textStyle.Render(title) + strings.Repeat(" ", innerWidth+2-titlePadding-len(title)) +
+		borderStyle.Render("│") + "\n")
+
+	// Separator
+	modalContent.WriteString(borderStyle.Render("├" + strings.Repeat("─", innerWidth+2) + "┤") + "\n")
+
+	// Empty line
+	modalContent.WriteString(borderStyle.Render("│") + strings.Repeat(" ", innerWidth+2) + borderStyle.Render("│") + "\n")
+
+	// Search input field
+	inputValue := "/ " + m.searchQuery + "█" // Cursor
+	if len(inputValue) > innerWidth {
+		inputValue = inputValue[:innerWidth]
+	}
+	modalContent.WriteString(borderStyle.Render("│") + "  " + inputStyle.Render(inputValue) +
+		strings.Repeat(" ", innerWidth-len(inputValue)) + borderStyle.Render("│") + "\n")
+
+	// Empty line
+	modalContent.WriteString(borderStyle.Render("│") + strings.Repeat(" ", innerWidth+2) + borderStyle.Render("│") + "\n")
+
+	// Results divider
+	modalContent.WriteString(borderStyle.Render("├" + strings.Repeat("─", innerWidth+2) + "┤") + "\n")
+
+	// Display results (up to 10)
+	maxResults := 10
+	if len(m.searchResults) == 0 {
+		if m.searchQuery == "" {
+			emptyMsg := "  Type to search across all resources..."
+			modalContent.WriteString(borderStyle.Render("│") + " " + labelStyle.Render(emptyMsg) +
+				strings.Repeat(" ", innerWidth+1-len(emptyMsg)) + borderStyle.Render("│") + "\n")
+		} else {
+			emptyMsg := "  No results found"
+			modalContent.WriteString(borderStyle.Render("│") + " " + labelStyle.Render(emptyMsg) +
+				strings.Repeat(" ", innerWidth+1-len(emptyMsg)) + borderStyle.Render("│") + "\n")
+		}
+	} else {
+		displayCount := len(m.searchResults)
+		if displayCount > maxResults {
+			displayCount = maxResults
+		}
+
+		for i := 0; i < displayCount; i++ {
+			result := m.searchResults[i]
+
+			// Format result line
+			var resultLine string
+			if i == m.searchSelectedIdx {
+				resultLine = fmt.Sprintf("  › [%s] %s", result.Type, result.Name)
+				if len(resultLine) > innerWidth {
+					resultLine = resultLine[:innerWidth-3] + "..."
+				}
+				modalContent.WriteString(borderStyle.Render("│") + " " + selectedStyle.Render(resultLine) +
+					strings.Repeat(" ", innerWidth+1-len(resultLine)) + borderStyle.Render("│") + "\n")
+			} else {
+				resultLine = fmt.Sprintf("    [%s] %s", result.Type, result.Name)
+				if len(resultLine) > innerWidth {
+					resultLine = resultLine[:innerWidth-3] + "..."
+				}
+				modalContent.WriteString(borderStyle.Render("│") + " " + textStyle.Render(resultLine) +
+					strings.Repeat(" ", innerWidth+1-len(resultLine)) + borderStyle.Render("│") + "\n")
+			}
+		}
+
+		if len(m.searchResults) > maxResults {
+			moreMsg := fmt.Sprintf("  ... and %d more results", len(m.searchResults)-maxResults)
+			modalContent.WriteString(borderStyle.Render("│") + " " + labelStyle.Render(moreMsg) +
+				strings.Repeat(" ", innerWidth+1-len(moreMsg)) + borderStyle.Render("│") + "\n")
+		}
+	}
+
+	// Empty line
+	modalContent.WriteString(borderStyle.Render("│") + strings.Repeat(" ", innerWidth+2) + borderStyle.Render("│") + "\n")
+
+	// Bottom border with controls
+	modalContent.WriteString(borderStyle.Render("├" + strings.Repeat("─", innerWidth+2) + "┤") + "\n")
+
+	// Controls
+	controls := "  [↑↓] Navigate   [Enter] Jump   [ESC] Cancel"
 	modalContent.WriteString(borderStyle.Render("│") + " " + labelStyle.Render(controls) +
 		strings.Repeat(" ", innerWidth+1-len(controls)) + borderStyle.Render("│") + "\n")
 

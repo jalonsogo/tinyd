@@ -2541,8 +2541,9 @@ func overlayModal(baseView string, modalContent string, width, height, modalWidt
 				modalLine := modalLines[modalLineIdx]
 				line.WriteString(modalLine)
 
-				// Right dimmed area - use modalWidth for proper alignment
-				rightStart := leftPadding + modalWidth
+				// Right dimmed area - calculate based on actual visual width
+				modalLineVisualWidth := len(stripAnsiCodes(modalLine))
+				rightStart := leftPadding + modalLineVisualWidth
 				if rightStart < width {
 					line.WriteString(dimBg.Render(strings.Repeat(" ", width-rightStart)))
 				}

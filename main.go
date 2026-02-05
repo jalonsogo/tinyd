@@ -3228,6 +3228,22 @@ func (m model) renderLogs() string {
 		}
 	}
 
+	// Action bar component with responsive width
+	m.actionBar = m.actionBar.SetStatusMessage(m.statusMessage)
+	if m.statusMessage == "" {
+		// Show scroll indicator and search help
+		scrollInfo := ""
+		if len(filteredLines) > availableLines {
+			scrollInfo = fmt.Sprintf(" [%d-%d of %d lines]", m.logsScrollOffset+1, end, len(filteredLines))
+		}
+		actions := " " + renderShortcut("Search (S)") + " | " + renderShortcut("Back (ESC)") + scrollInfo
+		m.actionBar = m.actionBar.SetActions(actions)
+	} else {
+		m.actionBar = m.actionBar.SetActions("")
+	}
+	actionBar := m.actionBar.WithWidth(width)
+	b.WriteString(actionBar.View())
+
 	return containerStyle.Render(b.String())
 }
 

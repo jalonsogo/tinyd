@@ -18,7 +18,7 @@
 - Adapts seamlessly to any terminal size
 - Works beautifully in VSCode terminal splits
 - Perfect for small screens and tmux panes
-- Minimum width: 60 columns
+- Minimum dimensions: 60 columns × 20 rows
 - Real-time resizing without restart
 
 **🔍 Deep Resource Inspection**

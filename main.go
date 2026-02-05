@@ -1292,6 +1292,33 @@ func inspectVolume(cli *client.Client, volumeName string) tea.Cmd {
 	}
 }
 
+// Inspect network
+func inspectNetwork(cli *client.Client, networkID string) tea.Cmd {
+	return func() tea.Msg {
+		if cli == nil {
+			return errMsg(fmt.Errorf("docker client not initialized"))
+		}
+
+		ctx := context.Background()
+		network, err := cli.NetworkInspect(ctx, networkID, client.NetworkInspectOptions{})
+		if err != nil {
+			return actionErrorMsg(fmt.Sprintf("Failed to inspect network: %v", err))
+		}
+
+		// Format inspect data as JSON (pretty-printed)
+		jsonData, err := json.MarshalIndent(network, "", "  ")
+		if err != nil {
+			return actionErrorMsg(fmt.Sprintf("Failed to format network data: %v", err))
+		}
+
+		var b strings.Builder
+		b.WriteString("=== NETWORK DETAILS ===\n\n")
+		b.WriteString(string(jsonData))
+
+		return inspectMsg(b.String())
+	}
+}
+
 // Delete container
 func deleteContainer(cli *client.Client, containerID, containerName string) tea.Cmd {
 	return func() tea.Msg {
@@ -1774,6 +1801,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.currentView = viewModeInspect
 					m.inspectMode = 0
 					return m, inspectVolume(m.dockerClient, selectedVolume.Name)
+				}
+			} else if m.activeTab == 3 {
+				// Networks tab
+				filteredNetworks := filterNetworks(m.networks, m.containers, m.dockerClient)
+				if len(filteredNetworks) > 0 && m.selectedRow < len(filteredNetworks) {
+					selectedNetwork := filteredNetworks[m.selectedRow]
+					m.selectedNetwork = &selectedNetwork
+					m.currentView = viewModeInspect
+					m.inspectMode = 0
+					return m, inspectNetwork(m.dockerClient, selectedNetwork.ID)
 				}
 			}
 		case "f", "F":
@@ -3260,6 +3297,8 @@ func (m model) renderInspect() string {
 		}
 	} else if m.selectedVolume != nil {
 		resourceName = m.selectedVolume.Name
+	} else if m.selectedNetwork != nil {
+		resourceName = m.selectedNetwork.Name
 	}
 
 	width := m.width

@@ -83,7 +83,6 @@ func (t TabsComponent) View() string {
 	var b strings.Builder
 
 	borderColor := lipgloss.Color("#303030")
-	bgColor := lipgloss.Color("#0a0a0a")
 	activeColor := lipgloss.Color("#FFFFFF")
 	inactiveColor := lipgloss.Color("#666666")
 

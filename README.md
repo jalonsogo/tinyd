@@ -4,7 +4,7 @@
 
 ![Docker TUI](https://img.shields.io/badge/docker-TUI-blue?style=for-the-badge&logo=docker)
 ![Go](https://img.shields.io/badge/go-1.19+-00ADD8?style=for-the-badge&logo=go)
-![License](https://img.shields.io/badge/license-MIT-green?style=for-the-badge)
+![License](https://img.shields.io/badge/license-LOLcense-purple?style=for-the-badge)
 
 ## ✨ Why TUIK?
 
@@ -278,9 +278,11 @@ go fmt ./...
 go build -o tuik
 ```
 
-## 📝 License
+## 📜 LOLcense
 
-MIT License - feel free to use this in your projects!
+**All rights reserved.**
+
+For {root} sake I'm a designer. Mostly all the code has been written by chatGPT and ad latere.
 
 ## 🙏 Acknowledgments
 

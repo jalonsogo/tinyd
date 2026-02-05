@@ -1,4 +1,4 @@
-package main
+package components
 
 import (
 	"fmt"
@@ -6,6 +6,11 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+)
+
+// Color palette
+var (
+	bgColor = lipgloss.Color("#0a0a0a")
 )
 
 // HeaderComponent renders the top header bar
@@ -553,4 +558,20 @@ func stripAnsiCodes(str string) string {
 		result = result[:start] + result[start+end+1:]
 	}
 	return result
+}
+
+// padRight pads a string to the right with spaces
+func padRight(s string, width int) string {
+	if len(s) >= width {
+		return s[:width]
+	}
+	return s + strings.Repeat(" ", width-len(s))
+}
+
+// padLeft pads a string to the left with spaces
+func padLeft(s string, width int) string {
+	if len(s) >= width {
+		return s[:width]
+	}
+	return strings.Repeat(" ", width-len(s)) + s
 }

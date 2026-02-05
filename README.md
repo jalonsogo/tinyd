@@ -1,150 +1,295 @@
-# Docker TUI
+# 🐋 TUIK - Docker Terminal UI
 
-A Terminal User Interface (TUI) for Docker management built with Go and Bubble Tea, designed from a Pencil specification.
+> A blazingly fast, beautifully minimal Terminal User Interface for Docker management. Built with Go and Bubble Tea.
 
-## Features
+![Docker TUI](https://img.shields.io/badge/docker-TUI-blue?style=for-the-badge&logo=docker)
+![Go](https://img.shields.io/badge/go-1.19+-00ADD8?style=for-the-badge&logo=go)
+![License](https://img.shields.io/badge/license-MIT-green?style=for-the-badge)
 
-- 📦 **Live Docker Integration** - Connects to Docker API for real container data
-- 🔄 **Auto-Refresh** - Updates container stats every 5 seconds
-- 📊 **Real-time Metrics** - CPU and memory usage for running containers
-- 🎮 **Interactive Container Management**:
-  - Start/Stop containers with a keypress
-  - Restart running containers
-  - Open container ports in your browser
-- 📜 **Smart Scrolling** - Handles large lists with viewport scrolling
-  - Shows 10 items at a time
-  - Auto-scrolls when navigating beyond visible area
-  - Scroll indicator shows position (e.g., "[1-10 of 50]")
-- 🎨 Classic terminal aesthetics with green/yellow color scheme
-- ⌨️  Fully keyboard-driven interface
-- 🐳 **Docker Socket Support** - Works with local and remote Docker daemons
-- 🔌 **Full Tab Support** - Complete views for Containers, Images, Volumes, and Networks
+## ✨ Why TUIK?
 
-## Prerequisites
+**TUIK** (Terminal UI Kit) transforms Docker management into a delightful terminal experience. No more memorizing complex CLI commands or switching between browser tabs. Everything you need is right at your fingertips.
+
+### 🎯 Standout Features
+
+**📱 Fully Responsive**
+- Adapts seamlessly to any terminal size
+- Works beautifully in VSCode terminal splits
+- Perfect for small screens and tmux panes
+- Minimum width: 60 columns
+- Real-time resizing without restart
+
+**🔍 Deep Resource Inspection**
+- **Images**: Explore layer-by-layer composition, architecture details, and exposed configurations
+- **Volumes**: See exactly which containers are using each volume, driver options, and usage statistics
+- **Containers**: Full stats, bind mounts, and runtime configuration at a glance
+
+**⚡ Lightning Fast Operations**
+- Start/stop containers with a single keypress
+- Restart misbehaving services instantly
+- Open exposed ports directly in your browser
+- Delete resources with confirmation modals
+- Run new containers from images interactively
+
+**🎨 Minimalist Design**
+- Clean, distraction-free interface
+- Classic terminal aesthetics (green/yellow/red color scheme)
+- Smart status indicators (green dots for active, gray for inactive, yellow for dangling)
+- Intelligent scrolling for large resource lists
+- Box-drawing characters for crisp borders
+
+## 🚀 Quick Start
+
+### Installation
+
+```bash
+# Clone the repository
+git clone https://github.com/jalonsogo/tuik.git
+cd tuik
+
+# Build the binary
+go build -o tuik
+
+# Run it!
+./tuik
+```
+
+### Prerequisites
 
 - Go 1.19 or higher
-- Docker daemon running (locally or remotely)
-- Access to Docker socket (usually `/var/run/docker.sock` on Linux/macOS)
+- Docker daemon running (local or remote)
+- Terminal with Unicode support
 
-## Installation
+## 🎮 Interactive Features
 
-```bash
-go mod download
-go build -o docker-tui
+### Container Management
+Press a key, get instant results:
+
+- **`s`** - Start or stop containers (smart toggle)
+- **`r`** - Restart running containers
+- **`c`** - Open interactive shell with altscreen (preserves TUI state)
+- **`o`** - Open exposed ports in browser (port selector for multiple ports)
+- **`l`** - View last 100 lines of logs in scrollable view
+- **`i`** - Inspect deep: stats, mounts, configuration
+- **`D`** - Delete with confirmation (works across all tabs)
+
+### Image Operations
+Manage your image library effortlessly:
+
+- **`R`** - Run new containers with interactive modal (name, ports, volumes, env vars)
+- **`i`** - Inspect layers, architecture, and configuration
+- **`D`** - Remove images (with force option)
+- **`f`** - Filter by status: All / In Use / Unused / Dangling
+
+### Volume Management
+Track volume usage across containers:
+
+- **`i`** - Inspect volume details, see which containers are attached
+- **`D`** - Delete volumes safely
+- **Container column** shows which containers use each volume in real-time
+
+### Network Inspection
+- View all networks with connection status
+- Filter active vs. unused networks
+- See IPv4/IPv6 subnet information
+
+## 📊 All Four Tabs
+
+### 1️⃣ Containers (Default)
+Real-time container monitoring with live CPU and memory stats:
+```
+● nginx-proxy     RUNNING   2.3%    128MB   nginx:latest        80:8080,443:8443
+● api-server      RUNNING   15.1%   512MB   node:18-alpine      3000:3000
+● postgres-db     RUNNING   8.7%    256MB   postgres:15         5432:5432
 ```
 
-## Docker Connection
-
-The application connects to Docker using the standard Docker environment variables:
-
-- **Local Docker**: Works out of the box if Docker is running
-- **Remote Docker**: Set `DOCKER_HOST` environment variable
-  ```bash
-  export DOCKER_HOST=tcp://remote-host:2376
-  ```
-- **Docker Desktop**: Automatically detected on macOS and Windows
-
-### Troubleshooting Connection Issues
-
-If you see a connection error:
-1. Verify Docker is running: `docker ps`
-2. Check Docker socket permissions
-3. Ensure `DOCKER_HOST` is set correctly (if using remote Docker)
-
-## Usage
-
-Run the application:
-
-```bash
-./docker-tui
+### 2️⃣ Images
+Complete image inventory with layer inspection:
+```
+● node            18-alpine    1.2GB    2d ago
+● nginx           latest       142MB    5d ago
+● postgres        15           412MB    1w ago
 ```
 
-Or run directly with Go:
-
-```bash
-go run main.go
+### 3️⃣ Volumes
+Volume management with container tracking:
+```
+● app-data        local    nginx-proxy, api-server    2d ago
+● postgres-vol    local    postgres-db                1w ago
 ```
 
-## Keyboard Shortcuts
+### 4️⃣ Networks
+Network topology at a glance:
+```
+● bridge          bridge   172.17.0.0/16    local
+● app-network     bridge   172.18.0.0/16    local
+```
+
+## ⌨️ Complete Keyboard Reference
 
 ### Navigation
-- `↑` or `k` - Move selection up (auto-scrolls)
-- `↓` or `j` - Move selection down (auto-scrolls)
-- `←` or `h` - Previous tab
-- `→` or `l` - Next tab
-- `1-4` - Jump to specific tab
-- `Ctrl+D` / `Ctrl+I` / `Ctrl+V` / `Ctrl+N` - Quick tab access
+| Key | Action |
+|-----|--------|
+| `↑` / `k` | Move selection up (with auto-scroll) |
+| `↓` / `j` | Move selection down (with auto-scroll) |
+| `←` / `h` | Previous tab |
+| `→` / `l` | Next tab |
+| `1-4` | Jump directly to tab |
+| `Ctrl+D/I/V/N` | Quick tab shortcuts |
 
-### Container Actions
-- `s` - Start/Stop selected container (toggles based on current state)
-- `r` - Restart selected container
-- `c` - Open console (launches altscreen with info header)
-- `o` - Open container's exposed port in browser (shows selector for multiple ports)
-- `l` - View container logs (last 100 lines)
-- `i` - Inspect container (stats, image, bind mounts)
-- `f` - Filter containers/images/volumes/networks
-- `Enter` - Refresh list / Select port (in port selector)
-- `ESC` - Return from detail views (logs/inspect/port selector)
+### Universal Actions
+| Key | Action |
+|-----|--------|
+| `i` | Inspect selected resource |
+| `D` | Delete selected resource |
+| `f` | Open filter modal |
+| `F1` | Toggle help screen |
+| `ESC` | Return to list view |
+| `Enter` | Refresh / Confirm |
+| `q` / `Ctrl+C` | Quit application |
 
-### Controls
-- `F1` - Toggle help screen
-- `q` or `Ctrl+C` - Quit application
+### Tab-Specific Actions
+| Key | Tab | Action |
+|-----|-----|--------|
+| `s` | Containers | Start/Stop container |
+| `r` | Containers | Restart container |
+| `c` | Containers | Open console (altscreen) |
+| `o` | Containers | Open port in browser |
+| `l` | Containers | View logs |
+| `R` | Images | Run new container |
 
-**Note:** Container data auto-refreshes every 5 seconds. Available actions are shown in the status bar at the bottom.
+## 🎯 Use Cases
 
-## Tab Views
+### Perfect For:
+- **DevOps Engineers**: Quick container health checks during deployments
+- **Backend Developers**: Managing local development environments
+- **System Administrators**: Monitoring production Docker hosts
+- **Students & Learners**: Visual way to understand Docker concepts
+- **Terminal Enthusiasts**: Because GUIs are overrated 😎
 
-### 1. Containers Tab (Default)
-Displays all Docker containers with live data:
-- Container ID and name
-- Status (RUNNING/STOPPED/PAUSED/ERROR) - color-coded
-- CPU usage percentage (for running containers)
-- Memory usage in human-readable format
-- Docker image name
-- Exposed ports (public and private)
-- **Interactive actions**: Start/Stop, Restart, Open in browser
-- **Smart sorting**: Containers ordered by status (Running → Paused → Error → Stopped)
+### Works Great In:
+- ✅ VSCode integrated terminal
+- ✅ iTerm2 / Alacritty / Wezterm
+- ✅ tmux panes
+- ✅ GNU Screen sessions
+- ✅ SSH sessions (local or remote Docker)
+- ✅ Windows Terminal
 
-### 2. Images Tab
-Lists all Docker images on the system:
-- Image ID (short format)
-- Repository name
-- Tag
-- Size (human-readable)
-- Created time (relative, e.g., "2d ago")
+## 🔧 Configuration
 
-### 3. Volumes Tab
-Shows all Docker volumes:
-- Volume name
-- Driver type
-- Mountpoint path
-- Scope (local/global)
-- Created time
+### Docker Connection
 
-### 4. Networks Tab
-Displays Docker networks:
-- Network ID
-- Network name
-- Driver (bridge, host, overlay, etc.)
-- Scope (local/global/swarm)
-- IPv4 subnet
-- IPv6 subnet (if configured)
+**Local Docker** (default):
+```bash
+./tuik
+```
 
-All data is fetched live from the Docker API and refreshes automatically every 5 seconds.
+**Remote Docker**:
+```bash
+export DOCKER_HOST=tcp://remote-host:2376
+./tuik
+```
 
-## Architecture
+**Docker Desktop** (macOS/Windows):
+Automatically detected, just run it!
 
-Built using:
-- **Bubble Tea** - TUI framework with The Elm Architecture
-- **Lipgloss** - Style definitions and terminal styling
-- **Go** - System programming language
+### Auto-Refresh
+Container stats refresh every 5 seconds automatically. No configuration needed.
 
-## Design
+## 🏗️ Architecture
 
-This TUI was generated from a Pencil design specification, ensuring pixel-perfect rendering that matches the original design mockup.
+Built with modern Go tooling:
 
-The interface uses:
-- Monospace font (JetBrains Mono recommended)
-- Classic terminal colors (Green, Yellow, Red, Cyan)
-- Box-drawing characters for borders
-- Selected row highlighting
+- **[Bubble Tea](https://github.com/charmbracelet/bubbletea)** - Elegant TUI framework with The Elm Architecture
+- **[Lipgloss](https://github.com/charmbracelet/lipgloss)** - Style definitions for terminal UIs
+- **[Docker Engine API](https://docs.docker.com/engine/api/)** - Official Docker client library
+
+Designed from a **Pencil specification** for pixel-perfect rendering.
+
+## 🎨 Design Philosophy
+
+**Minimalism First**
+- No unnecessary UI elements
+- Information density balanced with readability
+- Clear visual hierarchy through color and spacing
+
+**Keyboard Driven**
+- Every action is one keypress away
+- Vim-style navigation (`hjkl`) supported
+- No mouse required (terminal purist approved)
+
+**Responsive by Default**
+- Fluid column resizing
+- Intelligent text truncation
+- Graceful degradation on small screens
+
+## 📸 Screenshots
+
+```
+╭─ Containers ─╮─ Images ─╮─ Volumes ─╮─ Networks ─╮
+│             │          │           │            │
+─╯             ╰──────────╰───────────╰────────────╰─
+
+● nginx-proxy      RUNNING   2.3%   128MB   nginx:latest        80:8080
+● api-server       RUNNING   15.1%  512MB   node:18-alpine      3000:3000
+● postgres-db      RUNNING   8.7%   256MB   postgres:15         5432:5432
+● redis-cache      RUNNING   0.8%   32MB    redis:alpine        6379:6379
+
+────────────────────────────────────────────────────────────────────────────
+[S]top | [R]estart | [C]onsole | [O]pen in browser | [L]ogs | [I]nspect
+```
+
+## 🐛 Troubleshooting
+
+**Cannot connect to Docker daemon**
+```bash
+# Check if Docker is running
+docker ps
+
+# Verify socket permissions (Linux)
+sudo usermod -aG docker $USER
+newgrp docker
+
+# Check DOCKER_HOST (remote)
+echo $DOCKER_HOST
+```
+
+**Terminal display issues**
+- Ensure your terminal supports Unicode and 256 colors
+- Try a modern terminal: iTerm2, Alacritty, or Windows Terminal
+- Minimum terminal width: 60 columns
+
+**Keyboard shortcuts not working**
+- Check for key binding conflicts with terminal emulator
+- Try alternate keys (e.g., arrow keys instead of hjkl)
+
+## 🤝 Contributing
+
+Contributions are welcome! This project follows standard Go conventions.
+
+```bash
+# Run tests
+go test ./...
+
+# Format code
+go fmt ./...
+
+# Build
+go build -o tuik
+```
+
+## 📝 License
+
+MIT License - feel free to use this in your projects!
+
+## 🙏 Acknowledgments
+
+- Built with [Charm](https://charm.sh/) libraries (Bubble Tea, Lipgloss)
+- Inspired by k9s, lazydocker, and other terminal tools
+- Designed with Pencil UI specifications
+
+---
+
+**Made with ❤️ for terminal lovers everywhere**
+
+*Because the best interface is no interface at all.*

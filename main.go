@@ -1546,9 +1546,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "f1":
 			m.showHelp = !m.showHelp
-		case "r":
-			// Restart only works on containers tab
+		case "r", "R":
+			// Restart on containers tab, Run on images tab
 			if m.activeTab == 0 {
+				// Restart container
 				filteredContainers := filterContainers(m.containers, m.containerFilter)
 				if len(filteredContainers) > 0 && m.selectedRow < len(filteredContainers) {
 					selectedContainer := filteredContainers[m.selectedRow]
@@ -1556,8 +1557,28 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.statusMessage = fmt.Sprintf("Restarting %s...", selectedContainer.Name)
 					return m, restartContainer(m.dockerClient, selectedContainer.ID, selectedContainer.Name)
 				}
+			} else if m.activeTab == 1 && m.currentView == viewModeList {
+				// Run image
+				filteredImages := filterImages(m.images, m.containers, m.imageFilter)
+				if len(filteredImages) > 0 && m.selectedRow < len(filteredImages) {
+					selectedImage := filteredImages[m.selectedRow]
+					m.selectedImage = &selectedImage
+					m.currentView = viewModeRunImage
+					// Reset form fields
+					m.runContainerName = ""
+					m.runPortHost = ""
+					m.runPortContainer = ""
+					m.runPorts = []PortMapping{}
+					m.runVolumes = []VolumeMapping{}
+					m.runEnvVars = []EnvVar{}
+					m.runVolumeHost = ""
+					m.runVolumeContainer = ""
+					m.runEnvKey = ""
+					m.runEnvValue = ""
+					m.runModalField = 0
+				}
 			}
-		case "s":
+		case "s", "S":
 			// Start/Stop only works on containers tab
 			if m.activeTab == 0 {
 				filteredContainers := filterContainers(m.containers, m.containerFilter)
@@ -1574,7 +1595,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 			}
-		case "o":
+		case "o", "O":
 			// Open browser only works on containers tab
 			if m.activeTab == 0 {
 				filteredContainers := filterContainers(m.containers, m.containerFilter)
@@ -1598,7 +1619,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 			}
-		case "c":
+		case "c", "C":
 			// Open console with toolbar (uses altscreen)
 			if m.activeTab == 0 {
 				filteredContainers := filterContainers(m.containers, m.containerFilter)
@@ -1611,7 +1632,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 			}
-		case "l":
+		case "l", "L":
 			// View logs
 			if m.activeTab == 0 {
 				filteredContainers := filterContainers(m.containers, m.containerFilter)
@@ -1623,7 +1644,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, getContainerLogs(m.dockerClient, selectedContainer.ID)
 				}
 			}
-		case "i":
+		case "i", "I":
 			// Inspect container, image, or volume
 			if m.activeTab == 0 {
 				// Containers tab
@@ -1656,7 +1677,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, inspectVolume(m.dockerClient, selectedVolume.Name)
 				}
 			}
-		case "f":
+		case "f", "F":
 			// Open filter modal
 			if m.currentView == viewModeList {
 				m.currentView = viewModeFilter
@@ -1678,29 +1699,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.selectedFilter = m.networkFilter
 				}
 			}
-		case "R":
-			// Run image (Images tab only)
-			if m.activeTab == 1 && m.currentView == viewModeList {
-				filteredImages := filterImages(m.images, m.containers, m.imageFilter)
-				if len(filteredImages) > 0 && m.selectedRow < len(filteredImages) {
-					selectedImage := filteredImages[m.selectedRow]
-					m.selectedImage = &selectedImage
-					m.currentView = viewModeRunImage
-					// Reset form fields
-					m.runContainerName = ""
-					m.runPortHost = ""
-					m.runPortContainer = ""
-					m.runPorts = []PortMapping{}
-					m.runVolumes = []VolumeMapping{}
-					m.runEnvVars = []EnvVar{}
-					m.runVolumeHost = ""
-					m.runVolumeContainer = ""
-					m.runEnvKey = ""
-					m.runEnvValue = ""
-					m.runModalField = 0
-				}
-			}
-		case "D":
+		case "d", "D":
 			// Delete selected resource (works on all tabs)
 			if m.currentView == viewModeList {
 				switch m.activeTab {
@@ -1734,7 +1733,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 			}
-		case "p":
+		case "p", "P":
 			// Pull image (Images tab only)
 			if m.activeTab == 1 && m.currentView == viewModeList && !m.actionInProgress {
 				m.actionInProgress = true

@@ -87,6 +87,7 @@ const (
 	viewModeFilter
 	viewModeRunImage
 	viewModeDeleteConfirm
+	viewModePullImage
 )
 
 // Filter types for each tab
@@ -184,6 +185,9 @@ type model struct {
 	runEnvKey         string
 	runEnvValue       string
 	runModalField     int // Track which field is being edited
+
+	// Pull image modal
+	pullImageName string
 
 	// Delete confirmation
 	selectedVolume *Volume
@@ -1322,6 +1326,31 @@ func deleteImage(cli *client.Client, imageID string) tea.Cmd {
 	}
 }
 
+// Pull image
+func pullImage(cli *client.Client, imageName string) tea.Cmd {
+	return func() tea.Msg {
+		if cli == nil {
+			return errMsg(fmt.Errorf("docker client not initialized"))
+		}
+
+		ctx := context.Background()
+		reader, err := cli.ImagePull(ctx, imageName, client.ImagePullOptions{})
+		if err != nil {
+			return actionErrorMsg(fmt.Sprintf("Failed to pull image: %v", err))
+		}
+		defer reader.Close()
+
+		// Read the pull response to completion (required for the pull to actually happen)
+		// We don't display progress, just wait for it to finish
+		_, err = io.ReadAll(reader)
+		if err != nil {
+			return actionErrorMsg(fmt.Sprintf("Failed to read pull response: %v", err))
+		}
+
+		return actionSuccessMsg(fmt.Sprintf("Image %s pulled successfully", imageName))
+	}
+}
+
 // Delete volume
 func deleteVolume(cli *client.Client, volumeName string) tea.Cmd {
 	return func() tea.Msg {
@@ -1433,6 +1462,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.currentView == viewModeRunImage {
 			// Run modal - allow all keys for text input and navigation
 			return m, m.handleRunModalInput(msg)
+		} else if m.currentView == viewModePullImage {
+			// Pull image modal - allow text input
+			return m, m.handlePullModalInput(msg)
 		} else if m.currentView == viewModeLogs && m.logsSearchMode {
 			// Logs search mode - handle text input
 			key := msg.String()
@@ -1781,9 +1813,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "p", "P":
 			// Pull image (Images tab only)
 			if m.activeTab == 1 && m.currentView == viewModeList && !m.actionInProgress {
-				m.actionInProgress = true
-				m.statusMessage = "Enter image name to pull (e.g., nginx:latest)"
-				// TODO: Implement image pull modal/prompt
+				m.currentView = viewModePullImage
+				m.pullImageName = ""
 			}
 		case "esc":
 			// Exit search mode in logs view, or return to list view
@@ -2162,6 +2193,43 @@ func (m model) handleRunModalInput(msg tea.KeyMsg) tea.Cmd {
 	return nil
 }
 
+// Handle input in the Pull Image modal
+func (m model) handlePullModalInput(msg tea.KeyMsg) tea.Cmd {
+	key := msg.String()
+
+	switch key {
+	case "esc":
+		// Exit modal
+		m.currentView = viewModeList
+		m.pullImageName = ""
+		return nil
+
+	case "enter":
+		// Pull image if name is provided
+		if m.pullImageName != "" {
+			m.currentView = viewModeList
+			m.actionInProgress = true
+			m.statusMessage = fmt.Sprintf("Pulling image %s...", m.pullImageName)
+			return pullImage(m.dockerClient, m.pullImageName)
+		}
+		return nil
+
+	case "backspace":
+		// Delete character from image name
+		if len(m.pullImageName) > 0 {
+			m.pullImageName = m.pullImageName[:len(m.pullImageName)-1]
+		}
+
+	default:
+		// Add character to image name (only if it's a single character)
+		if len(key) == 1 {
+			m.pullImageName += key
+		}
+	}
+
+	return nil
+}
+
 // Get max row count for current tab (accounting for filters)
 func (m model) getMaxRow() int {
 	switch m.activeTab {
@@ -2380,6 +2448,8 @@ func (m model) View() string {
 		return m.renderFilterModal()
 	case viewModeRunImage:
 		return m.renderRunImageModal()
+	case viewModePullImage:
+		return m.renderPullImageModal()
 	case viewModeDeleteConfirm:
 		return m.renderDeleteConfirm()
 	}
@@ -3514,6 +3584,151 @@ func (m model) renderStopConfirm() string {
 		if strings.TrimSpace(modalLines[i]) != "" {
 			result.WriteString(modalLines[i])
 		} else {
+			result.WriteString(baseLines[i])
+		}
+		result.WriteString("\n")
+	}
+
+	return result.String()
+}
+
+func (m model) renderPullImageModal() string {
+	// Use responsive dimensions
+	width := m.width
+	if width < 80 {
+		width = 80
+	}
+	height := m.height
+	if height < 30 {
+		height = 30
+	}
+
+	// Render base view (images list)
+	baseView := m.renderImages()
+
+	// Dim the base view
+	dimStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#666666"))
+
+	dimmedBase := dimStyle.Render(baseView)
+
+	// Modal dimensions
+	modalWidth := 60
+	if modalWidth > width-10 {
+		modalWidth = width - 10
+	}
+
+	// Build modal with box-drawing characters
+	var modalContent strings.Builder
+
+	borderColor := lipgloss.Color("#666666")
+	textColor := lipgloss.Color("#CCCCCC")
+	labelColor := lipgloss.Color("#999999")
+	inputColor := lipgloss.Color("#FFFFFF")
+
+	borderStyle := lipgloss.NewStyle().Foreground(borderColor)
+	textStyle := lipgloss.NewStyle().Foreground(textColor)
+	labelStyle := lipgloss.NewStyle().Foreground(labelColor)
+	inputStyle := lipgloss.NewStyle().Foreground(inputColor)
+
+	// Calculate inner width
+	innerWidth := modalWidth - 4
+
+	// Top border
+	modalContent.WriteString(borderStyle.Render("╭" + strings.Repeat("─", innerWidth+2) + "╮") + "\n")
+
+	// Title
+	title := " Pull Docker Image "
+	titlePadding := (innerWidth + 2 - len(title)) / 2
+	modalContent.WriteString(borderStyle.Render("│") + strings.Repeat(" ", titlePadding) +
+		textStyle.Render(title) + strings.Repeat(" ", innerWidth+2-titlePadding-len(title)) +
+		borderStyle.Render("│") + "\n")
+
+	// Separator
+	modalContent.WriteString(borderStyle.Render("├" + strings.Repeat("─", innerWidth+2) + "┤") + "\n")
+
+	// Empty line
+	modalContent.WriteString(borderStyle.Render("│") + strings.Repeat(" ", innerWidth+2) + borderStyle.Render("│") + "\n")
+
+	// Image name field label
+	label := "  Image Name:"
+	modalContent.WriteString(borderStyle.Render("│") + " " + labelStyle.Render(label) +
+		strings.Repeat(" ", innerWidth+1-len(label)) + borderStyle.Render("│") + "\n")
+
+	// Image name input field
+	inputValue := m.pullImageName + "█" // Cursor
+	if len(inputValue) > innerWidth-4 {
+		inputValue = inputValue[:innerWidth-4]
+	}
+	modalContent.WriteString(borderStyle.Render("│") + "  " + inputStyle.Render(inputValue) +
+		strings.Repeat(" ", innerWidth-len(inputValue)) + borderStyle.Render("│") + "\n")
+
+	// Empty line
+	modalContent.WriteString(borderStyle.Render("│") + strings.Repeat(" ", innerWidth+2) + borderStyle.Render("│") + "\n")
+
+	// Help text
+	helpText := "  Examples: nginx:latest, postgres:15, node:18-alpine"
+	if len(helpText) > innerWidth+2 {
+		helpText = helpText[:innerWidth-1] + "..."
+	}
+	modalContent.WriteString(borderStyle.Render("│") + " " + labelStyle.Render(helpText) +
+		strings.Repeat(" ", innerWidth+1-len(helpText)) + borderStyle.Render("│") + "\n")
+
+	// Empty line
+	modalContent.WriteString(borderStyle.Render("│") + strings.Repeat(" ", innerWidth+2) + borderStyle.Render("│") + "\n")
+
+	// Bottom border with controls
+	modalContent.WriteString(borderStyle.Render("├" + strings.Repeat("─", innerWidth+2) + "┤") + "\n")
+
+	// Controls
+	controls := "  [Enter] Pull   [ESC] Cancel"
+	modalContent.WriteString(borderStyle.Render("│") + " " + labelStyle.Render(controls) +
+		strings.Repeat(" ", innerWidth+1-len(controls)) + borderStyle.Render("│") + "\n")
+
+	// Bottom border
+	modalContent.WriteString(borderStyle.Render("╰" + strings.Repeat("─", innerWidth+2) + "╯") + "\n")
+
+	// Split into lines
+	modalLines := strings.Split(modalContent.String(), "\n")
+
+	// Calculate vertical position (center)
+	modalHeight := len(modalLines)
+	topPadding := (height - modalHeight) / 2
+	if topPadding < 0 {
+		topPadding = 0
+	}
+
+	// Overlay modal on dimmed base
+	baseLines := strings.Split(dimmedBase, "\n")
+	var result strings.Builder
+
+	for i := 0; i < height; i++ {
+		if i >= topPadding && i < topPadding+modalHeight {
+			modalLineIdx := i - topPadding
+			if modalLineIdx < len(modalLines) {
+				// Overlay modal on the base line
+				leftPadding := (width - modalWidth) / 2
+				if leftPadding < 0 {
+					leftPadding = 0
+				}
+
+				if i < len(baseLines) {
+					baseLine := baseLines[i]
+					// Simply place modal at the calculated position, background is already dimmed
+					if leftPadding > 0 && len(baseLine) > leftPadding {
+						result.WriteString(baseLine[:leftPadding] + modalLines[modalLineIdx])
+					} else {
+						result.WriteString(strings.Repeat(" ", leftPadding) + modalLines[modalLineIdx])
+					}
+				} else {
+					result.WriteString(strings.Repeat(" ", leftPadding) + modalLines[modalLineIdx])
+				}
+			} else {
+				if i < len(baseLines) {
+					result.WriteString(baseLines[i])
+				}
+			}
+		} else if i < len(baseLines) {
 			result.WriteString(baseLines[i])
 		}
 		result.WriteString("\n")

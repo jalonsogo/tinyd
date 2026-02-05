@@ -2,6 +2,7 @@ package docker
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -94,7 +95,7 @@ func (c *Client) PullImage(ctx context.Context, imageName string) error {
 	return nil
 }
 
-// InspectImage retrieves detailed image information
+// InspectImage retrieves detailed image information as JSON
 func (c *Client) InspectImage(ctx context.Context, imageID string) (string, error) {
 	if ctx == nil {
 		var cancel context.CancelFunc
@@ -107,7 +108,13 @@ func (c *Client) InspectImage(ctx context.Context, imageID string) (string, erro
 		return "", fmt.Errorf("failed to inspect image: %w", err)
 	}
 
-	return formatImageInspect(inspectResult), nil
+	// Return full image inspect data as JSON
+	jsonBytes, err := json.Marshal(inspectResult)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal inspect result: %w", err)
+	}
+
+	return string(jsonBytes), nil
 }
 
 // RunContainer creates and starts a container from an image

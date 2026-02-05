@@ -72,11 +72,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case types.InspectMsg:
-		if m.showRawJSON {
-			m.inspectContent = string(msg)
-		} else {
-			m.inspectContent = m.formatInspectOutput(string(msg))
-		}
+		// Show prettified JSON with jq-style color coding
+		m.inspectContent = colorizeJSON(string(msg))
 		return m, nil
 
 	case types.TickMsg:
@@ -111,8 +108,9 @@ func (m *Model) handleResize(msg tea.WindowSizeMsg) (tea.Model, tea.Cmd) {
 	// - Tabs: 4 lines
 	// - Table header: 2 lines
 	// - Action bar: 3 lines
+	// - Scroll indicator: 2 lines
 	// - Buffer: 1 line
-	fixedLines := 10
+	fixedLines := 12
 	m.viewportHeight = msg.Height - fixedLines
 	if m.viewportHeight < 3 {
 		m.viewportHeight = 3 // Minimum 3 visible rows
@@ -160,7 +158,7 @@ func (m *Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.lastCtrlC = now
 		m.statusMessage = "Press Ctrl+C again to exit"
 		return m, nil
-	case "F1", "?":
+	case "H", "?":
 		m.showHelp = !m.showHelp
 		return m, nil
 	}
@@ -192,12 +190,34 @@ func (m *Model) handleListViewKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.deleteConfirmOption = 1 // No
 			return m, nil
 		case "enter":
-			if m.deleteConfirmOption == 0 && m.selectedRow < len(m.containers) {
+			if m.deleteConfirmOption == 0 {
 				// User confirmed delete
-				container := m.containers[m.selectedRow]
 				m.deleteConfirmMode = false
 				m.actionInProgress = true
-				return m, m.deleteContainerCmd(container.ID, container.Name)
+
+				// Handle delete based on active tab
+				switch m.activeTab {
+				case 0: // Containers
+					if m.selectedRow < len(m.containers) {
+						container := m.containers[m.selectedRow]
+						return m, m.deleteContainerCmd(container.ID, container.Name)
+					}
+				case 1: // Images
+					if m.selectedRow < len(m.images) {
+						image := m.images[m.selectedRow]
+						return m, m.deleteImageCmd(image.ID)
+					}
+				case 2: // Volumes
+					if m.selectedRow < len(m.volumes) {
+						volume := m.volumes[m.selectedRow]
+						return m, m.deleteVolumeCmd(volume.Name)
+					}
+				case 3: // Networks
+					if m.selectedRow < len(m.networks) {
+						network := m.networks[m.selectedRow]
+						return m, m.deleteNetworkCmd(network.ID)
+					}
+				}
 			}
 			// User cancelled or selected No
 			m.deleteConfirmMode = false
@@ -250,6 +270,8 @@ func (m *Model) handleListViewKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "s", "S":
 		if m.activeTab == 0 {
 			return m.handleContainerStartStop()
+		} else if m.activeTab == 1 {
+			return m.handleImageStart()
 		}
 		return m, nil
 	case "r", "R":
@@ -263,13 +285,27 @@ func (m *Model) handleListViewKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case "i", "I":
-		if m.activeTab == 0 {
+		switch m.activeTab {
+		case 0: // Containers
 			return m.handleContainerInspect()
+		case 1: // Images
+			return m.handleImageInspect()
+		case 2: // Volumes
+			return m.handleVolumeInspect()
+		case 3: // Networks
+			return m.handleNetworkInspect()
 		}
 		return m, nil
 	case "d", "D":
-		if m.activeTab == 0 {
+		switch m.activeTab {
+		case 0: // Containers
 			return m.handleContainerDelete()
+		case 1: // Images
+			return m.handleImageDelete()
+		case 2: // Volumes
+			return m.handleVolumeDelete()
+		case 3: // Networks
+			return m.handleNetworkDelete()
 		}
 		return m, nil
 	case "e", "E":
@@ -350,15 +386,16 @@ func (m *Model) handleInspectViewKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "esc":
 		m.currentView = types.ViewModeList
 		m.inspectContent = ""
-		m.showRawJSON = false
 		return m, nil
 
-	case "j", "J":
-		// Toggle raw JSON view
-		m.showRawJSON = !m.showRawJSON
-		if m.selectedContainer != nil {
-			return m, m.inspectContainerCmd(m.selectedContainer.ID)
+	case "up", "k":
+		if m.logsScrollOffset > 0 {
+			m.logsScrollOffset--
 		}
+		return m, nil
+
+	case "down", "j":
+		m.logsScrollOffset++
 		return m, nil
 
 	default:
@@ -435,7 +472,6 @@ func (m *Model) handleContainerInspect() (tea.Model, tea.Cmd) {
 	m.selectedContainer = &container
 	m.currentView = types.ViewModeInspect
 	m.inspectContent = ""
-	m.showRawJSON = false
 	return m, m.inspectContainerCmd(container.ID)
 }
 
@@ -464,4 +500,85 @@ func (m *Model) handleContainerExec() (tea.Model, tea.Cmd) {
 	// Create exec command for interactive shell
 	// The command will suspend the TUI and run in the foreground
 	return m, m.execContainerCmd(container.ID)
+}
+
+// Image action handlers
+
+func (m *Model) handleImageStart() (tea.Model, tea.Cmd) {
+	if m.selectedRow >= len(m.images) {
+		return m, nil
+	}
+	image := m.images[m.selectedRow]
+	m.selectedImage = &image
+
+	// Start the image (create and run a container from it)
+	// For now, use simple defaults - can be expanded to a modal later
+	return m, m.runContainerCmd()
+}
+
+func (m *Model) handleImageInspect() (tea.Model, tea.Cmd) {
+	if m.selectedRow >= len(m.images) {
+		return m, nil
+	}
+	image := m.images[m.selectedRow]
+	m.selectedImage = &image
+	m.currentView = types.ViewModeInspect
+	m.inspectContent = ""
+	return m, m.inspectImageCmd(image.ID)
+}
+
+func (m *Model) handleImageDelete() (tea.Model, tea.Cmd) {
+	if m.selectedRow >= len(m.images) {
+		return m, nil
+	}
+	// Toggle delete confirmation mode
+	m.deleteConfirmMode = !m.deleteConfirmMode
+	m.deleteConfirmOption = 1 // Default to "No"
+	return m, nil
+}
+
+// Volume action handlers
+
+func (m *Model) handleVolumeInspect() (tea.Model, tea.Cmd) {
+	if m.selectedRow >= len(m.volumes) {
+		return m, nil
+	}
+	volume := m.volumes[m.selectedRow]
+	m.selectedVolume = &volume
+	m.currentView = types.ViewModeInspect
+	m.inspectContent = ""
+	return m, m.inspectVolumeCmd(volume.Name)
+}
+
+func (m *Model) handleVolumeDelete() (tea.Model, tea.Cmd) {
+	if m.selectedRow >= len(m.volumes) {
+		return m, nil
+	}
+	// Toggle delete confirmation mode
+	m.deleteConfirmMode = !m.deleteConfirmMode
+	m.deleteConfirmOption = 1 // Default to "No"
+	return m, nil
+}
+
+// Network action handlers
+
+func (m *Model) handleNetworkInspect() (tea.Model, tea.Cmd) {
+	if m.selectedRow >= len(m.networks) {
+		return m, nil
+	}
+	network := m.networks[m.selectedRow]
+	m.selectedNetwork = &network
+	m.currentView = types.ViewModeInspect
+	m.inspectContent = ""
+	return m, m.inspectNetworkCmd(network.ID)
+}
+
+func (m *Model) handleNetworkDelete() (tea.Model, tea.Cmd) {
+	if m.selectedRow >= len(m.networks) {
+		return m, nil
+	}
+	// Toggle delete confirmation mode
+	m.deleteConfirmMode = !m.deleteConfirmMode
+	m.deleteConfirmOption = 1 // Default to "No"
+	return m, nil
 }

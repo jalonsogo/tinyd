@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/docker/go-units"
 	"tinyd/internal/components"
 	"tinyd/internal/types"
 )
@@ -185,7 +186,9 @@ func (m *Model) renderContainersTab() string {
 		SetRows(rows).
 		SetVisibleRange(0, len(rows))
 
-	return table.View()
+	// Add scroll indicator
+	scrollInfo := m.getScrollIndicator(len(m.containers))
+	return table.View() + scrollInfo
 }
 
 // renderImagesTab renders the images tab with proper table formatting
@@ -248,11 +251,17 @@ func (m *Model) renderImagesTab() string {
 		// Combine repository:tag
 		repoTag := img.Repository + ":" + img.Tag
 
+		// Only truncate if actually needed
+		repoTagCell := repoTag
+		if len(repoTag) > headers[1].Width {
+			repoTagCell = truncateWithEllipsis(repoTag, headers[1].Width)
+		}
+
 		cells := []string{
-			grayStyle.Render("○"),
-			truncateWithEllipsis(repoTag, headers[1].Width), // Fill column - truncate
-			img.Size,                                         // Fixed column - short values
-			shortenTimeAgo(img.Created),                     // Fixed column - already short
+			m.getImageStatusDot(img),
+			repoTagCell,
+			img.Size,                    // Fixed column - short values
+			shortenTimeAgo(img.Created), // Fixed column - already short
 		}
 
 		rows = append(rows, components.TableRow{
@@ -267,7 +276,9 @@ func (m *Model) renderImagesTab() string {
 		SetRows(rows).
 		SetVisibleRange(0, len(rows))
 
-	return table.View()
+	// Add scroll indicator
+	scrollInfo := m.getScrollIndicator(len(m.images))
+	return table.View() + scrollInfo
 }
 
 // renderVolumesTab renders the volumes tab with proper table formatting
@@ -361,7 +372,9 @@ func (m *Model) renderVolumesTab() string {
 		SetRows(rows).
 		SetVisibleRange(0, len(rows))
 
-	return table.View()
+	// Add scroll indicator
+	scrollInfo := m.getScrollIndicator(len(m.volumes))
+	return table.View() + scrollInfo
 }
 
 // renderNetworksTab renders the networks tab with proper table formatting
@@ -455,23 +468,341 @@ func (m *Model) renderNetworksTab() string {
 		SetRows(rows).
 		SetVisibleRange(0, len(rows))
 
-	return table.View()
+	// Add scroll indicator
+	scrollInfo := m.getScrollIndicator(len(m.networks))
+	return table.View() + scrollInfo
 }
 
 // renderLogsView renders the logs detail view
 func (m *Model) renderLogsView() string {
-	m.detailView = m.detailView.SetContent(m.logsContent)
-	m.detailView = m.detailView.SetScroll(m.logsScrollOffset)
-	return m.detailView.View()
+	var b strings.Builder
+
+	titleStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#FFFFFF")).
+		Background(lipgloss.Color("#0a0a0a")).
+		Bold(true)
+
+	helpStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#999999")).
+		Background(lipgloss.Color("#0a0a0a"))
+
+	lineStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#999999")).
+		Background(lipgloss.Color("#0a0a0a"))
+
+	contentStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#999999")).
+		Background(lipgloss.Color("#0a0a0a"))
+
+	// Header
+	headerText := "Logs"
+	if m.selectedContainer != nil {
+		headerText = "Logs: " + m.selectedContainer.Name
+	}
+	headerRight := "[ESC] Back"
+	headerSpacing := strings.Repeat(" ", m.width-len(headerText)-len(headerRight)-4)
+	b.WriteString(titleStyle.Render(headerText))
+	b.WriteString(headerSpacing)
+	b.WriteString(helpStyle.Render(headerRight))
+	b.WriteString("\n")
+
+	// Content divider
+	b.WriteString(lineStyle.Render(strings.Repeat("─", m.width-2)))
+	b.WriteString("\n")
+
+	// Calculate available lines for content
+	// Height - tabs(4) - header(1) - divider(1) - action bar(3) - scroll indicator(2)
+	availableLines := m.height - 11
+	if availableLines < 5 {
+		availableLines = 5
+	}
+
+	// Render content with scrolling
+	if m.logsContent == "" {
+		b.WriteString(contentStyle.Render(" Loading..."))
+		b.WriteString("\n")
+	} else {
+		lines := strings.Split(m.logsContent, "\n")
+		totalLines := len(lines)
+
+		end := m.logsScrollOffset + availableLines
+		if end > totalLines {
+			end = totalLines
+		}
+
+		for i := m.logsScrollOffset; i < end; i++ {
+			if i < len(lines) {
+				b.WriteString(lines[i])
+				b.WriteString("\n")
+			}
+		}
+
+		// Fill remaining lines
+		for i := end - m.logsScrollOffset; i < availableLines; i++ {
+			b.WriteString("\n")
+		}
+
+		// Add scroll indicator
+		b.WriteString(m.getInspectScrollIndicator(totalLines, availableLines))
+	}
+
+	return b.String()
 }
 
 // renderInspectView renders the inspect detail view
 func (m *Model) renderInspectView() string {
-	m.detailView = m.detailView.SetContent(m.inspectContent)
-	return m.detailView.View()
+	var b strings.Builder
+
+	titleStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#FFFFFF")).
+		Background(lipgloss.Color("#0a0a0a")).
+		Bold(true)
+
+	helpStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#999999")).
+		Background(lipgloss.Color("#0a0a0a"))
+
+	lineStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#999999")).
+		Background(lipgloss.Color("#0a0a0a"))
+
+	contentStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#999999")).
+		Background(lipgloss.Color("#0a0a0a"))
+
+	// Header
+	headerText := "Inspect"
+	headerRight := "[ESC] Back"
+	headerSpacing := strings.Repeat(" ", m.width-len(headerText)-len(headerRight)-4)
+	b.WriteString(titleStyle.Render(headerText))
+	b.WriteString(headerSpacing)
+	b.WriteString(helpStyle.Render(headerRight))
+	b.WriteString("\n")
+
+	// Content divider
+	b.WriteString(lineStyle.Render(strings.Repeat("─", m.width-2)))
+	b.WriteString("\n")
+
+	// Calculate available lines for content
+	// Height - tabs(4) - header(1) - divider(1) - action bar(3) - scroll indicator(2)
+	availableLines := m.height - 11
+	if availableLines < 5 {
+		availableLines = 5
+	}
+
+	// Render content with scrolling
+	if m.inspectContent == "" {
+		b.WriteString(contentStyle.Render(" Loading..."))
+		b.WriteString("\n")
+	} else {
+		lines := strings.Split(m.inspectContent, "\n")
+		totalLines := len(lines)
+
+		end := m.logsScrollOffset + availableLines
+		if end > totalLines {
+			end = totalLines
+		}
+
+		for i := m.logsScrollOffset; i < end; i++ {
+			if i < len(lines) {
+				b.WriteString(lines[i])
+				b.WriteString("\n")
+			}
+		}
+
+		// Fill remaining lines
+		for i := end - m.logsScrollOffset; i < availableLines; i++ {
+			b.WriteString("\n")
+		}
+
+		// Add scroll indicator
+		b.WriteString(m.getInspectScrollIndicator(totalLines, availableLines))
+	}
+
+	return b.String()
 }
 
 // Helper functions
+
+// getScrollIndicator returns a scroll indicator showing current position and scroll availability
+func (m *Model) getScrollIndicator(totalItems int) string {
+	if totalItems == 0 {
+		return ""
+	}
+
+	var b strings.Builder
+	indicatorStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#666666")).
+		Background(lipgloss.Color("#0a0a0a"))
+
+	highlightStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#00FFFF")).
+		Background(lipgloss.Color("#0a0a0a"))
+
+	b.WriteString("\n")
+
+	// Show scroll indicators and position info
+	canScrollUp := m.scrollOffset > 0
+	canScrollDown := m.scrollOffset+m.viewportHeight < totalItems
+
+	start := m.scrollOffset + 1
+	end := m.scrollOffset + m.viewportHeight
+	if end > totalItems {
+		end = totalItems
+	}
+
+	// Build indicator line
+	var parts []string
+
+	if canScrollUp {
+		parts = append(parts, highlightStyle.Render("↑ More above"))
+	}
+
+	parts = append(parts, indicatorStyle.Render(fmt.Sprintf("Showing %d-%d of %d", start, end, totalItems)))
+
+	if canScrollDown {
+		parts = append(parts, highlightStyle.Render("↓ More below"))
+	}
+
+	b.WriteString(strings.Join(parts, "  "))
+
+	return b.String()
+}
+
+// getInspectScrollIndicator returns scroll indicator for inspect view showing line positions
+func (m *Model) getInspectScrollIndicator(totalLines, visibleLines int) string {
+	if totalLines == 0 {
+		return ""
+	}
+
+	var b strings.Builder
+	indicatorStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#666666")).
+		Background(lipgloss.Color("#0a0a0a"))
+
+	highlightStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#00FFFF")).
+		Background(lipgloss.Color("#0a0a0a"))
+
+	lineStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#999999")).
+		Background(lipgloss.Color("#0a0a0a"))
+
+	// Separator line
+	b.WriteString(lineStyle.Render(strings.Repeat("─", m.width-2)))
+	b.WriteString("\n")
+
+	// Show scroll indicators and position info
+	canScrollUp := m.logsScrollOffset > 0
+	canScrollDown := m.logsScrollOffset+visibleLines < totalLines
+
+	start := m.logsScrollOffset + 1
+	end := m.logsScrollOffset + visibleLines
+	if end > totalLines {
+		end = totalLines
+	}
+
+	// Build indicator line
+	var parts []string
+
+	if canScrollUp {
+		parts = append(parts, highlightStyle.Render("↑ Scroll up"))
+	}
+
+	parts = append(parts, indicatorStyle.Render(fmt.Sprintf("Lines %d-%d of %d", start, end, totalLines)))
+
+	if canScrollDown {
+		parts = append(parts, highlightStyle.Render("↓ Scroll down"))
+	}
+
+	b.WriteString(strings.Join(parts, "  "))
+
+	return b.String()
+}
+
+// colorizeJSON adds jq-style syntax highlighting to JSON output
+func colorizeJSON(jsonStr string) string {
+	// Color styles for JSON syntax highlighting
+	keyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#87CEEB"))      // Light blue for keys
+	stringStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#98C379"))   // Green for strings
+	numberStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#D19A66"))   // Orange for numbers
+	boolStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#E5C07B"))     // Yellow for booleans
+	nullStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#5C6370"))     // Gray for null
+	punctStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#ABB2BF"))    // Light gray for punctuation
+
+	var result strings.Builder
+	var inString bool
+	var isKey bool
+	var buffer strings.Builder
+
+	for i := 0; i < len(jsonStr); i++ {
+		ch := jsonStr[i]
+
+		if ch == '"' && (i == 0 || jsonStr[i-1] != '\\') {
+			if inString {
+				// End of string
+				buffer.WriteByte(ch)
+				str := buffer.String()
+				if isKey {
+					result.WriteString(keyStyle.Render(str))
+					isKey = false
+				} else {
+					result.WriteString(stringStyle.Render(str))
+				}
+				buffer.Reset()
+				inString = false
+			} else {
+				// Start of string - check if it's a key (followed by :)
+				inString = true
+				buffer.WriteByte(ch)
+				// Look ahead to see if this is a key
+				j := i + 1
+				for j < len(jsonStr) && jsonStr[j] != '"' {
+					if jsonStr[j] == '\\' && j+1 < len(jsonStr) {
+						j++ // Skip escaped character
+					}
+					j++
+				}
+				if j < len(jsonStr) {
+					j++ // Skip closing quote
+					for j < len(jsonStr) && (jsonStr[j] == ' ' || jsonStr[j] == '\t') {
+						j++
+					}
+					if j < len(jsonStr) && jsonStr[j] == ':' {
+						isKey = true
+					}
+				}
+			}
+		} else if inString {
+			buffer.WriteByte(ch)
+		} else if ch >= '0' && ch <= '9' || ch == '-' || ch == '.' {
+			// Number
+			numStart := i
+			for i < len(jsonStr) && (jsonStr[i] >= '0' && jsonStr[i] <= '9' ||
+				jsonStr[i] == '.' || jsonStr[i] == '-' || jsonStr[i] == 'e' ||
+				jsonStr[i] == 'E' || jsonStr[i] == '+') {
+				i++
+			}
+			i-- // Back up one
+			result.WriteString(numberStyle.Render(jsonStr[numStart : i+1]))
+		} else if i+4 <= len(jsonStr) && jsonStr[i:i+4] == "true" {
+			result.WriteString(boolStyle.Render("true"))
+			i += 3
+		} else if i+5 <= len(jsonStr) && jsonStr[i:i+5] == "false" {
+			result.WriteString(boolStyle.Render("false"))
+			i += 4
+		} else if i+4 <= len(jsonStr) && jsonStr[i:i+4] == "null" {
+			result.WriteString(nullStyle.Render("null"))
+			i += 3
+		} else if ch == '{' || ch == '}' || ch == '[' || ch == ']' || ch == ',' || ch == ':' {
+			result.WriteString(punctStyle.Render(string(ch)))
+		} else {
+			result.WriteByte(ch)
+		}
+	}
+
+	return result.String()
+}
 
 // getStatusDot returns a colored status indicator based on container status
 func (m *Model) getStatusDot(status string) string {
@@ -489,6 +820,16 @@ func (m *Model) getStatusDot(status string) string {
 	default:
 		return grayStyle.Render("○") // Gray empty circle for unknown
 	}
+}
+
+// getImageStatusDot returns a colored status indicator based on image status
+func (m *Model) getImageStatusDot(img types.Image) string {
+	if img.InUse {
+		return greenStyle.Render("●") // Green filled circle for in-use images
+	} else if img.Dangling {
+		return redStyle.Render("●") // Red filled circle for dangling images (warning)
+	}
+	return grayStyle.Render("○") // Gray empty circle for unused images
 }
 
 // truncateWithEllipsis truncates a string to max length with ellipsis
@@ -582,8 +923,7 @@ func (m *Model) getActionShortcuts() string {
 		}
 	case 1: // Images
 		shortcuts = []string{
-			renderShortcut("R", "un"),
-			renderShortcut("P", "ull"),
+			renderShortcut("S", "tart"),
 			renderShortcut("I", "nspect"),
 			renderShortcut("D", "elete"),
 		}
@@ -601,7 +941,7 @@ func (m *Model) getActionShortcuts() string {
 
 	// Add common shortcuts
 	shortcuts = append(shortcuts,
-		renderShortcut("F1", " Help"),
+		renderShortcut("H", "elp"),
 	)
 
 	return strings.Join(shortcuts, " ")
@@ -754,6 +1094,121 @@ func (m *Model) formatInspectOutput(jsonStr string) string {
 	b.WriteString(fmt.Sprintf("    ├─ ExitCode : %s\n", exitCode))
 	b.WriteString(fmt.Sprintf("    ├─ OOMKill  : %s\n", oomKilled))
 	b.WriteString(fmt.Sprintf("    └─ Restart  : %s\n", restartPolicy))
+
+	return b.String()
+}
+
+// formatImageInspectOutput formats image inspect JSON into a readable tree
+func (m *Model) formatImageInspectOutput(jsonStr string) string {
+	var b strings.Builder
+
+	// Parse JSON to extract key information
+	var data map[string]interface{}
+	if err := json.Unmarshal([]byte(jsonStr), &data); err != nil {
+		return "Error parsing inspect data: " + err.Error()
+	}
+
+	// Helper to safely get string values (tries multiple keys)
+	getStr := func(m map[string]interface{}, keys ...string) string {
+		for _, key := range keys {
+			if v, ok := m[key]; ok {
+				if s, ok := v.(string); ok {
+					return s
+				}
+			}
+		}
+		return "-"
+	}
+
+	// Helper to safely get nested map
+	getMap := func(m map[string]interface{}, key string) map[string]interface{} {
+		if v, ok := m[key]; ok {
+			if m, ok := v.(map[string]interface{}); ok {
+				return m
+			}
+		}
+		return make(map[string]interface{})
+	}
+
+	// Extract data
+	id := getStr(data, "ID", "Id")
+	if len(id) > 19 {
+		id = id[7:19] // Skip "sha256:" prefix
+	}
+
+	// Get tags
+	tags := "-"
+	if tagsArr, ok := data["RepoTags"]; ok {
+		if arr, ok := tagsArr.([]interface{}); ok && len(arr) > 0 {
+			tags = fmt.Sprintf("%v", arr[0])
+		}
+	}
+
+	// Size
+	size := "-"
+	if sizeVal, ok := data["Size"]; ok {
+		if s, ok := sizeVal.(float64); ok {
+			size = units.BytesSize(s)
+		}
+	}
+
+	// Created
+	created := getStr(data, "Created")
+	if created != "" && len(created) > 10 {
+		created = created[:10] // Just the date part
+	}
+
+	// Architecture
+	os := getStr(data, "Os")
+	arch := getStr(data, "Architecture")
+	variant := getStr(data, "Variant")
+	platform := os + "/" + arch
+	if variant != "" && variant != "-" {
+		platform += "/" + variant
+	}
+
+	// Config
+	config := getMap(data, "Config")
+	entrypoint := "-"
+	if ep, ok := config["Entrypoint"]; ok && ep != nil {
+		if arr, ok := ep.([]interface{}); ok && len(arr) > 0 {
+			entrypoint = fmt.Sprintf("%v", arr[0])
+		}
+	}
+
+	cmd := "-"
+	if cmdVal, ok := config["Cmd"]; ok && cmdVal != nil {
+		if arr, ok := cmdVal.([]interface{}); ok && len(arr) > 0 {
+			cmd = fmt.Sprintf("%v", arr[0])
+		}
+	}
+
+	// Layers
+	layerCount := 0
+	rootFS := getMap(data, "RootFS")
+	if layers, ok := rootFS["Layers"]; ok {
+		if arr, ok := layers.([]interface{}); ok {
+			layerCount = len(arr)
+		}
+	}
+
+	// Build tree structure
+	b.WriteString("Press [J] to toggle raw JSON view\n\n")
+	b.WriteString(fmt.Sprintf("Image\n"))
+	b.WriteString(fmt.Sprintf("├─ ID       : %s\n", id))
+	b.WriteString(fmt.Sprintf("├─ Tag      : %s\n", tags))
+	b.WriteString(fmt.Sprintf("├─ Size     : %s\n", size))
+	b.WriteString(fmt.Sprintf("├─ Created  : %s\n", created))
+	b.WriteString(fmt.Sprintf("│\n"))
+	b.WriteString(fmt.Sprintf("├─ Platform\n"))
+	b.WriteString(fmt.Sprintf("│   └─ %s\n", platform))
+	b.WriteString(fmt.Sprintf("│\n"))
+	b.WriteString(fmt.Sprintf("├─ Layers\n"))
+	b.WriteString(fmt.Sprintf("│   └─ Count : %d\n", layerCount))
+	b.WriteString(fmt.Sprintf("│\n"))
+	b.WriteString(fmt.Sprintf("└─ Config\n"))
+	b.WriteString(fmt.Sprintf("    ├─ Entrypoint : %s\n", entrypoint))
+	b.WriteString(fmt.Sprintf("    └─ Cmd        : %s\n", cmd))
 
 	return b.String()
 }

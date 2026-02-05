@@ -2634,20 +2634,13 @@ func overlayModal(baseView string, modalContent string, width, height, modalWidt
 				}
 
 				// Modal content (not dimmed)
-				line.WriteString(modalLines[modalLineIdx])
+				modalLine := modalLines[modalLineIdx]
+				line.WriteString(modalLine)
 
-				// Right dimmed area
-				rightStart := leftPadding + len(stripAnsiCodes(modalLines[modalLineIdx]))
+				// Right dimmed area - use modalWidth for proper alignment
+				rightStart := leftPadding + modalWidth
 				if rightStart < width {
-					rightPart := ""
-					if i < len(baseLines) && len(baseLines[i]) > rightStart {
-						rightPart = baseLines[i][rightStart:]
-					}
-					if len(rightPart) > 0 {
-						line.WriteString(dimBg.Render(stripAnsiCodes(rightPart)))
-					} else {
-						line.WriteString(dimBg.Render(strings.Repeat(" ", width-rightStart)))
-					}
+					line.WriteString(dimBg.Render(strings.Repeat(" ", width-rightStart)))
 				}
 
 				result.WriteString(line.String())
@@ -3559,12 +3552,6 @@ func (m model) renderPortSelector() string {
 		containerName = m.selectedContainer.Name
 	}
 
-	// Dim the base view
-	dimStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#666666"))
-
-	dimmedBase := dimStyle.Render(baseView)
-
 	// Modal dimensions
 	modalWidth := 50
 	if modalWidth > width-10 {
@@ -3575,12 +3562,13 @@ func (m model) renderPortSelector() string {
 	var modalContent strings.Builder
 
 	borderColor := lipgloss.Color("#666666")
+	modalBg := lipgloss.Color("#0a0a0a")
 	textColor := lipgloss.Color("#CCCCCC")
 	selectedColor := lipgloss.Color("#FFFFFF")
 
-	borderStyle := lipgloss.NewStyle().Foreground(borderColor)
-	textStyle := lipgloss.NewStyle().Foreground(textColor)
-	selectedStyle := lipgloss.NewStyle().Foreground(selectedColor).Bold(true)
+	borderStyle := lipgloss.NewStyle().Foreground(borderColor).Background(modalBg)
+	textStyle := lipgloss.NewStyle().Foreground(textColor).Background(modalBg)
+	selectedStyle := lipgloss.NewStyle().Foreground(selectedColor).Background(modalBg).Bold(true)
 
 	// Calculate inner width
 	innerWidth := modalWidth - 4
@@ -3595,13 +3583,13 @@ func (m model) renderPortSelector() string {
 
 	// Title
 	titlePadding := innerWidth - len(title) + 2
-	modalContent.WriteString(borderStyle.Render("│") + textStyle.Render(title) + strings.Repeat(" ", titlePadding) + borderStyle.Render("│") + "\n")
+	modalContent.WriteString(borderStyle.Render("│") + textStyle.Render(title) + textStyle.Render(strings.Repeat(" ", titlePadding)) + borderStyle.Render("│") + "\n")
 
 	// Divider
 	modalContent.WriteString(borderStyle.Render("├" + strings.Repeat("─", innerWidth+2) + "┤") + "\n")
 
 	// Empty line
-	modalContent.WriteString(borderStyle.Render("│") + strings.Repeat(" ", innerWidth+2) + borderStyle.Render("│") + "\n")
+	modalContent.WriteString(borderStyle.Render("│") + textStyle.Render(strings.Repeat(" ", innerWidth+2)) + borderStyle.Render("│") + "\n")
 
 	// Port list with triangle indicator for single choice
 	for i, port := range m.availablePorts {
@@ -3612,59 +3600,30 @@ func (m model) renderPortSelector() string {
 			optionLine = " ▶ " + portLine
 			optionText := selectedStyle.Render(optionLine)
 			padding := innerWidth - len(optionLine) + 2
-			modalContent.WriteString(borderStyle.Render("│") + optionText + strings.Repeat(" ", padding) + borderStyle.Render("│") + "\n")
+			modalContent.WriteString(borderStyle.Render("│") + optionText + textStyle.Render(strings.Repeat(" ", padding)) + borderStyle.Render("│") + "\n")
 		} else {
 			// Unselected option with spaces
 			optionLine = "   " + portLine
 			optionText := textStyle.Render(optionLine)
 			padding := innerWidth - len(optionLine) + 2
-			modalContent.WriteString(borderStyle.Render("│") + optionText + strings.Repeat(" ", padding) + borderStyle.Render("│") + "\n")
+			modalContent.WriteString(borderStyle.Render("│") + optionText + textStyle.Render(strings.Repeat(" ", padding)) + borderStyle.Render("│") + "\n")
 		}
 	}
 
 	// Empty line
-	modalContent.WriteString(borderStyle.Render("│") + strings.Repeat(" ", innerWidth+2) + borderStyle.Render("│") + "\n")
+	modalContent.WriteString(borderStyle.Render("│") + textStyle.Render(strings.Repeat(" ", innerWidth+2)) + borderStyle.Render("│") + "\n")
 
 	// Footer with keyboard shortcuts
 	footerText := " ↑/↓ navigate, " + renderShortcut("Enter") + " select-open, " + renderShortcut("Esc") + " exit"
 	footerClean := " ↑/↓ navigate, Enter select-open, Esc exit"
 	footerPadding := innerWidth - len(footerClean) + 2
-	modalContent.WriteString(borderStyle.Render("│") + footerText + strings.Repeat(" ", footerPadding) + borderStyle.Render("│") + "\n")
+	modalContent.WriteString(borderStyle.Render("│") + footerText + textStyle.Render(strings.Repeat(" ", footerPadding)) + borderStyle.Render("│") + "\n")
 
 	// Bottom border
-	modalContent.WriteString(borderStyle.Render("╰" + strings.Repeat("─", innerWidth+2) + "╯"))
+	modalContent.WriteString(borderStyle.Render("╰" + strings.Repeat("─", innerWidth+2) + "╯") + "\n")
 
-	modal := modalContent.String()
-
-	// Create layers
-	baseLayer := lipgloss.NewStyle().
-		Width(width).
-		Height(height).
-		Render(dimmedBase)
-
-	modalPlaced := lipgloss.Place(
-		width, height,
-		lipgloss.Center, lipgloss.Center,
-		modal,
-		lipgloss.WithWhitespaceChars(" "),
-		lipgloss.WithWhitespaceForeground(lipgloss.NoColor{}),
-	)
-
-	// Composite the layers
-	baseLines := strings.Split(baseLayer, "\n")
-	modalLines := strings.Split(modalPlaced, "\n")
-
-	var result strings.Builder
-	for i := 0; i < len(baseLines) && i < len(modalLines); i++ {
-		if strings.TrimSpace(modalLines[i]) != "" {
-			result.WriteString(modalLines[i])
-		} else {
-			result.WriteString(baseLines[i])
-		}
-		result.WriteString("\n")
-	}
-
-	return result.String()
+	// Use overlay helper to render modal on dimmed background
+	return overlayModal(baseView, modalContent.String(), width, height, modalWidth)
 }
 
 func (m model) renderFilterModal() string {
@@ -3691,12 +3650,6 @@ func (m model) renderFilterModal() string {
 		baseView = m.renderNetworks()
 	}
 
-	// Dim the base view
-	dimStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#666666"))
-
-	dimmedBase := dimStyle.Render(baseView)
-
 	// Modal dimensions
 	modalWidth := 50
 	if modalWidth > width-10 {
@@ -3707,14 +3660,15 @@ func (m model) renderFilterModal() string {
 	var modalContent strings.Builder
 
 	borderColor := lipgloss.Color("#666666")
+	modalBg := lipgloss.Color("#0a0a0a")
 	textColor := lipgloss.Color("#CCCCCC")
 	selectedColor := lipgloss.Color("#FFFFFF")
 	checkColor := lipgloss.Color("#00FF00") // Green checkmark
 
-	borderStyle := lipgloss.NewStyle().Foreground(borderColor)
-	textStyle := lipgloss.NewStyle().Foreground(textColor)
-	selectedStyle := lipgloss.NewStyle().Foreground(selectedColor).Bold(true)
-	checkStyle := lipgloss.NewStyle().Foreground(checkColor)
+	borderStyle := lipgloss.NewStyle().Foreground(borderColor).Background(modalBg)
+	textStyle := lipgloss.NewStyle().Foreground(textColor).Background(modalBg)
+	selectedStyle := lipgloss.NewStyle().Foreground(selectedColor).Background(modalBg).Bold(true)
+	checkStyle := lipgloss.NewStyle().Foreground(checkColor).Background(modalBg)
 
 	// Calculate inner width
 	innerWidth := modalWidth - 4
@@ -3725,13 +3679,13 @@ func (m model) renderFilterModal() string {
 	// Title
 	title := " Filter "
 	titlePadding := innerWidth + 2 - len(title)
-	modalContent.WriteString(borderStyle.Render("│") + textStyle.Render(title) + strings.Repeat(" ", titlePadding) + borderStyle.Render("│") + "\n")
+	modalContent.WriteString(borderStyle.Render("│") + textStyle.Render(title) + textStyle.Render(strings.Repeat(" ", titlePadding)) + borderStyle.Render("│") + "\n")
 
 	// Divider
 	modalContent.WriteString(borderStyle.Render("├" + strings.Repeat("─", innerWidth+2) + "┤") + "\n")
 
 	// Empty line
-	modalContent.WriteString(borderStyle.Render("│") + strings.Repeat(" ", innerWidth+2) + borderStyle.Render("│") + "\n")
+	modalContent.WriteString(borderStyle.Render("│") + textStyle.Render(strings.Repeat(" ", innerWidth+2)) + borderStyle.Render("│") + "\n")
 
 	// Filter options with checkbox style
 	for i, option := range m.filterOptions {
@@ -3742,60 +3696,31 @@ func (m model) renderFilterModal() string {
 			// Calculate clean lengths for proper spacing
 			cleanLen := 1 + 3 + 1 + len(option) // space + [✓] + space + option
 			padding := innerWidth + 2 - cleanLen
-			modalContent.WriteString(borderStyle.Render("│") + " " + checkbox + optionText + strings.Repeat(" ", padding) + borderStyle.Render("│") + "\n")
+			modalContent.WriteString(borderStyle.Render("│") + textStyle.Render(" ") + checkbox + optionText + textStyle.Render(strings.Repeat(" ", padding)) + borderStyle.Render("│") + "\n")
 		} else {
 			// Unselected option with empty checkbox
 			checkbox := textStyle.Render("[ ]")
 			optionText := textStyle.Render(" " + option)
 			cleanLen := 1 + 3 + 1 + len(option) // space + [ ] + space + option
 			padding := innerWidth + 2 - cleanLen
-			modalContent.WriteString(borderStyle.Render("│") + " " + checkbox + optionText + strings.Repeat(" ", padding) + borderStyle.Render("│") + "\n")
+			modalContent.WriteString(borderStyle.Render("│") + textStyle.Render(" ") + checkbox + optionText + textStyle.Render(strings.Repeat(" ", padding)) + borderStyle.Render("│") + "\n")
 		}
 	}
 
 	// Empty line
-	modalContent.WriteString(borderStyle.Render("│") + strings.Repeat(" ", innerWidth+2) + borderStyle.Render("│") + "\n")
+	modalContent.WriteString(borderStyle.Render("│") + textStyle.Render(strings.Repeat(" ", innerWidth+2)) + borderStyle.Render("│") + "\n")
 
 	// Footer with keyboard shortcuts
 	footerText := " ↑/↓ navigate, " + renderShortcut("Enter") + " select-apply, " + renderShortcut("Esc") + " exit "
 	footerClean := " ↑/↓ navigate, Enter select-apply, Esc exit "
 	footerPadding := innerWidth + 2 - len(footerClean)
-	modalContent.WriteString(borderStyle.Render("│") + footerText + strings.Repeat(" ", footerPadding) + borderStyle.Render("│") + "\n")
+	modalContent.WriteString(borderStyle.Render("│") + footerText + textStyle.Render(strings.Repeat(" ", footerPadding)) + borderStyle.Render("│") + "\n")
 
 	// Bottom border
-	modalContent.WriteString(borderStyle.Render("╰" + strings.Repeat("─", innerWidth+2) + "╯"))
+	modalContent.WriteString(borderStyle.Render("╰" + strings.Repeat("─", innerWidth+2) + "╯") + "\n")
 
-	modal := modalContent.String()
-
-	// Create layers using Lipgloss with responsive dimensions
-	baseLayer := lipgloss.NewStyle().
-		Width(width).
-		Height(height).
-		Render(dimmedBase)
-
-	modalPlaced := lipgloss.Place(
-		width, height,
-		lipgloss.Center, lipgloss.Center,
-		modal,
-		lipgloss.WithWhitespaceChars(" "),
-		lipgloss.WithWhitespaceForeground(lipgloss.NoColor{}),
-	)
-
-	// Composite the layers
-	baseLines := strings.Split(baseLayer, "\n")
-	modalLines := strings.Split(modalPlaced, "\n")
-
-	var result strings.Builder
-	for i := 0; i < len(baseLines) && i < len(modalLines); i++ {
-		if strings.TrimSpace(modalLines[i]) != "" {
-			result.WriteString(modalLines[i])
-		} else {
-			result.WriteString(baseLines[i])
-		}
-		result.WriteString("\n")
-	}
-
-	return result.String()
+	// Use overlay helper to render modal on dimmed background
+	return overlayModal(baseView, modalContent.String(), width, height, modalWidth)
 }
 
 func (m model) renderStopConfirm() string {

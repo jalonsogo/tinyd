@@ -210,3 +210,7 @@ For {root} sake I'm a designer. Mostly all the code has been written by Claude a
 **Made with ❤️ for terminal lovers everywhere**
 
 *Because the best interface is no interface at all.*
+
+## LOLcense
+
+For {root} sake I'm a designer. Mostly all the code has been written by Claude and ad latere.

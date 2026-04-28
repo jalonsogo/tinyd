@@ -8,43 +8,79 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// Color palette
+// DarkBackground is set by InitTheme. Exported so other packages can read it.
+var DarkBackground = true
+
+// Color palette — populated by InitTheme before the program starts.
 var (
-	bgColor = lipgloss.Color("#0a0a0a")
+	ColorNormal       lipgloss.Color
+	ColorDim          lipgloss.Color
+	ColorBright       lipgloss.Color
+	ColorHeader       lipgloss.Color
+	ColorBorder       lipgloss.Color
+	ColorActiveBorder lipgloss.Color
+	ColorHighlight    lipgloss.Color
+	ColorEmpty        lipgloss.Color
+
+	// Selection highlight: colored background so it's always visible on any
+	// terminal background color, regardless of theme detection accuracy.
+	ColorSelectedBg lipgloss.Color
+	ColorSelectedFg lipgloss.Color
 )
 
-// HeaderComponent renders the top header bar
-type HeaderComponent struct {
-	title   string
-	help    string
-	width   int
-}
+func init() { InitTheme(true) } // default: dark; overridden by main() before NewProgram
 
-func NewHeaderComponent(title, help string) HeaderComponent {
-	return HeaderComponent{
-		title: title,
-		help:  help,
-		width: 80, // Default, will be updated
+// InitTheme selects the color palette for a dark or light terminal.
+// Override auto-detection with TINYD_THEME=light or TINYD_THEME=dark.
+func InitTheme(dark bool) {
+	DarkBackground = dark
+	if dark {
+		ColorNormal = lipgloss.Color("#AAAAAA")
+		ColorDim = lipgloss.Color("#666666")
+		ColorBright = lipgloss.Color("#EEEEEE")
+		ColorHeader = lipgloss.Color("#CCCCCC")
+		ColorBorder = lipgloss.Color("#3A3A3A")
+		ColorActiveBorder = lipgloss.Color("#DDDDDD")
+		ColorHighlight = lipgloss.Color("#00CCFF")
+		ColorEmpty = lipgloss.Color("#3A3A3A")
+		ColorSelectedBg = lipgloss.Color("#1D4ED8")
+		ColorSelectedFg = lipgloss.Color("#FFFFFF")
+	} else {
+		// Light mode: high-contrast dark-on-white palette
+		ColorNormal = lipgloss.Color("#222222") // near-black body text
+		ColorDim = lipgloss.Color("#666666")    // medium gray for inactive items
+		ColorBright = lipgloss.Color("#000000") // pure black for emphasis
+		ColorHeader = lipgloss.Color("#000000") // black bold headers
+		ColorBorder = lipgloss.Color("#CCCCCC") // light gray separators
+		ColorActiveBorder = lipgloss.Color("#000000")
+		ColorHighlight = lipgloss.Color("#005588") // dark teal
+		ColorEmpty = lipgloss.Color("#BBBBBB")
+		ColorSelectedBg = lipgloss.Color("#1D4ED8") // blue bg — always pops
+		ColorSelectedFg = lipgloss.Color("#FFFFFF")
 	}
 }
 
+// HeaderComponent renders the top header bar
+type HeaderComponent struct {
+	title string
+	help  string
+	width int
+}
+
+func NewHeaderComponent(title, help string) HeaderComponent {
+	return HeaderComponent{title: title, help: help, width: 80}
+}
+
 func (h HeaderComponent) WithWidth(width int) HeaderComponent {
-	h.width = width - 2 // Account for borders
+	h.width = width - 2
 	return h
 }
 
-func (h HeaderComponent) Init() tea.Cmd {
-	return nil
-}
+func (h HeaderComponent) Init() tea.Cmd { return nil }
 
-func (h HeaderComponent) Update(msg tea.Msg) (HeaderComponent, tea.Cmd) {
-	return h, nil
-}
+func (h HeaderComponent) Update(msg tea.Msg) (HeaderComponent, tea.Cmd) { return h, nil }
 
-func (h HeaderComponent) View() string {
-	// Minimalistic: no header, just return empty
-	return ""
-}
+func (h HeaderComponent) View() string { return "" }
 
 // TabsComponent renders the tab navigation
 type TabsComponent struct {
@@ -59,11 +95,7 @@ type TabItem struct {
 }
 
 func NewTabsComponent(tabs []TabItem, activeTab int) TabsComponent {
-	return TabsComponent{
-		tabs:      tabs,
-		activeTab: activeTab,
-		width:     80,
-	}
+	return TabsComponent{tabs: tabs, activeTab: activeTab, width: 80}
 }
 
 func (t TabsComponent) WithWidth(width int) TabsComponent {
@@ -71,13 +103,9 @@ func (t TabsComponent) WithWidth(width int) TabsComponent {
 	return t
 }
 
-func (t TabsComponent) Init() tea.Cmd {
-	return nil
-}
+func (t TabsComponent) Init() tea.Cmd { return nil }
 
-func (t TabsComponent) Update(msg tea.Msg) (TabsComponent, tea.Cmd) {
-	return t, nil
-}
+func (t TabsComponent) Update(msg tea.Msg) (TabsComponent, tea.Cmd) { return t, nil }
 
 func (t TabsComponent) SetActiveTab(index int) TabsComponent {
 	t.activeTab = index
@@ -87,26 +115,14 @@ func (t TabsComponent) SetActiveTab(index int) TabsComponent {
 func (t TabsComponent) View() string {
 	var b strings.Builder
 
-	borderColor := lipgloss.Color("#999999")
-	activeBorderColor := lipgloss.Color("#FFFFFF") // Brighter border for active tab
-	activeColor := lipgloss.Color("#FFFFFF")
-	inactiveColor := lipgloss.Color("#666666")
-
-	borderStyle := lipgloss.NewStyle().
-		Foreground(borderColor).
-		Background(bgColor)
-
-	activeBorderStyle := lipgloss.NewStyle().
-		Foreground(activeBorderColor).
-		Background(bgColor)
+	borderStyle := lipgloss.NewStyle().Foreground(ColorBorder)
+	activeBorderStyle := lipgloss.NewStyle().Foreground(ColorActiveBorder).Bold(true)
 
 	// Top row with rounded corners
 	b.WriteString(" ")
 	for i, tab := range t.tabs {
 		tabText := fmt.Sprintf(" %s ", tab.Name)
 		tabWidth := len(tabText)
-
-		// Top border with rounded corners (use bright border for active tab)
 		style := borderStyle
 		if i == t.activeTab {
 			style = activeBorderStyle
@@ -121,67 +137,51 @@ func (t TabsComponent) View() string {
 	b.WriteString(" ")
 	for i, tab := range t.tabs {
 		tabText := fmt.Sprintf(" %s ", tab.Name)
-
-		// Border style (use bright border for active tab)
 		bStyle := borderStyle
 		if i == t.activeTab {
 			bStyle = activeBorderStyle
 		}
-
-		// Left border
 		b.WriteString(bStyle.Render("│"))
-
-		// Tab text
-		textStyle := lipgloss.NewStyle().
-			Foreground(inactiveColor).
-			Background(bgColor)
+		textStyle := lipgloss.NewStyle().Foreground(ColorDim)
 		if i == t.activeTab {
-			textStyle = lipgloss.NewStyle().
-				Foreground(activeColor).
-				Background(bgColor).
-				Bold(true)
+			textStyle = lipgloss.NewStyle().Foreground(ColorBright).Bold(true)
 		}
 		b.WriteString(textStyle.Render(tabText))
-
-		// Right border
 		b.WriteString(bStyle.Render("│"))
 	}
 	b.WriteString("\n")
 
-	// Bottom row with connecting line
-	b.WriteString(borderStyle.Render("─"))
+	// Bottom row — the main horizontal line spans the full width and should
+	// always be bright/visible, so everything here uses activeBorderStyle.
+	b.WriteString(activeBorderStyle.Render("─"))
 	for i, tab := range t.tabs {
 		tabText := fmt.Sprintf(" %s ", tab.Name)
 		tabWidth := len(tabText)
-
 		if i == t.activeTab {
-			// Active tab: no bottom border (open to content), use bright border
 			b.WriteString(activeBorderStyle.Render("╯"))
 			b.WriteString(strings.Repeat(" ", tabWidth))
 			b.WriteString(activeBorderStyle.Render("╰"))
 		} else {
-			// Inactive tab: bottom border connects to line
-			b.WriteString(borderStyle.Render("┴"))
-			b.WriteString(borderStyle.Render(strings.Repeat("─", tabWidth)))
-			b.WriteString(borderStyle.Render("┴"))
+			b.WriteString(activeBorderStyle.Render("┴"))
+			b.WriteString(activeBorderStyle.Render(strings.Repeat("─", tabWidth)))
+			b.WriteString(activeBorderStyle.Render("┴"))
 		}
 	}
 
-	// Calculate remaining width for the horizontal line
-	totalTabWidth := 1 // Initial left padding
+	totalTabWidth := 1
 	for _, tab := range t.tabs {
-		totalTabWidth += len(fmt.Sprintf(" %s ", tab.Name)) + 2 // +2 for borders
+		totalTabWidth += len(fmt.Sprintf(" %s ", tab.Name)) + 2
 	}
 	remaining := t.width - totalTabWidth
 	if remaining > 0 {
-		b.WriteString(borderStyle.Render(strings.Repeat("─", remaining)))
+		b.WriteString(activeBorderStyle.Render(strings.Repeat("─", remaining)))
 	}
 	b.WriteString("\n")
 
 	return b.String()
 }
 
-// StatusLineComponent renders a status line with item count
+// StatusLineComponent (unused but kept for API compat)
 type StatusLineComponent struct {
 	label           string
 	count           int
@@ -190,11 +190,7 @@ type StatusLineComponent struct {
 }
 
 func NewStatusLineComponent(label string, count int) StatusLineComponent {
-	return StatusLineComponent{
-		label: label,
-		count: count,
-		width: 80,
-	}
+	return StatusLineComponent{label: label, count: count, width: 80}
 }
 
 func (s StatusLineComponent) WithWidth(width int) StatusLineComponent {
@@ -202,23 +198,16 @@ func (s StatusLineComponent) WithWidth(width int) StatusLineComponent {
 	return s
 }
 
-func (s StatusLineComponent) Init() tea.Cmd {
-	return nil
-}
+func (s StatusLineComponent) Init() tea.Cmd { return nil }
 
-func (s StatusLineComponent) Update(msg tea.Msg) (StatusLineComponent, tea.Cmd) {
-	return s, nil
-}
+func (s StatusLineComponent) Update(msg tea.Msg) (StatusLineComponent, tea.Cmd) { return s, nil }
 
 func (s StatusLineComponent) SetScrollIndicator(indicator string) StatusLineComponent {
 	s.scrollIndicator = indicator
 	return s
 }
 
-func (s StatusLineComponent) View() string {
-	// Minimalistic: no status line, or very subtle
-	return ""
-}
+func (s StatusLineComponent) View() string { return "" }
 
 // TableComponent renders a table with headers and rows
 type TableComponent struct {
@@ -230,9 +219,9 @@ type TableComponent struct {
 }
 
 type TableHeader struct {
-	Label     string
-	Width     int
-	AlignRight bool // Right-align for numbers, left-align for text
+	Label      string
+	Width      int
+	AlignRight bool
 }
 
 type TableRow struct {
@@ -242,11 +231,7 @@ type TableRow struct {
 }
 
 func NewTableComponent(headers []TableHeader) TableComponent {
-	return TableComponent{
-		headers: headers,
-		rows:    []TableRow{},
-		width:   80,
-	}
+	return TableComponent{headers: headers, rows: []TableRow{}, width: 80}
 }
 
 func (t TableComponent) WithWidth(width int) TableComponent {
@@ -254,13 +239,9 @@ func (t TableComponent) WithWidth(width int) TableComponent {
 	return t
 }
 
-func (t TableComponent) Init() tea.Cmd {
-	return nil
-}
+func (t TableComponent) Init() tea.Cmd { return nil }
 
-func (t TableComponent) Update(msg tea.Msg) (TableComponent, tea.Cmd) {
-	return t, nil
-}
+func (t TableComponent) Update(msg tea.Msg) (TableComponent, tea.Cmd) { return t, nil }
 
 func (t TableComponent) SetRows(rows []TableRow) TableComponent {
 	t.rows = rows
@@ -276,22 +257,13 @@ func (t TableComponent) SetVisibleRange(start, end int) TableComponent {
 func (t TableComponent) View() string {
 	var b strings.Builder
 
-	headerStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#CCCCCC")).
-		Background(lipgloss.Color("#0a0a0a")).
-		Bold(true)
-
-	normalCellStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#999999")).
-		Background(lipgloss.Color("#0a0a0a"))
-
+	headerStyle := lipgloss.NewStyle().Foreground(ColorHeader).Bold(true)
+	normalCellStyle := lipgloss.NewStyle().Foreground(ColorNormal)
 	selectedCellStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#FFFFFF")).
-		Background(lipgloss.Color("#0a0a0a"))
-
-	lineStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#999999")).
-		Background(lipgloss.Color("#0a0a0a"))
+		Background(ColorSelectedBg).
+		Foreground(ColorSelectedFg).
+		Bold(true)
+	lineStyle := lipgloss.NewStyle().Foreground(ColorBorder)
 
 	// Table headers
 	for j, header := range t.headers {
@@ -308,29 +280,25 @@ func (t TableComponent) View() string {
 	}
 	b.WriteString("\n")
 
-	// Header bottom line
+	// Header divider
 	totalWidth := 0
 	for _, header := range t.headers {
 		totalWidth += header.Width
 	}
-	totalWidth += (len(t.headers) - 1) * 2 // Add spacing between columns
+	totalWidth += (len(t.headers) - 1) * 2
 	b.WriteString(lineStyle.Render(strings.Repeat("─", totalWidth)))
 	b.WriteString("\n")
 
 	// Table rows
 	if len(t.rows) == 0 {
-		emptyMsg := " No items found"
-		emptyStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#444444")).
-			Background(lipgloss.Color("#0a0a0a"))
-		b.WriteString(emptyStyle.Render(emptyMsg))
+		emptyStyle := lipgloss.NewStyle().Foreground(ColorEmpty)
+		b.WriteString(emptyStyle.Render(" No items found"))
 		b.WriteString("\n")
 	} else {
 		for i := t.start; i < t.end && i < len(t.rows); i++ {
 			row := t.rows[i]
 
-			// Check if this is a special full-width row (like delete confirmation)
-			// Detect by checking if all cells after index 0 are empty
+			// Detect full-width rows (delete confirmation overlay)
 			isFullWidthRow := len(row.Cells) > 1
 			for j := 1; j < len(row.Cells); j++ {
 				if row.Cells[j] != "" {
@@ -340,28 +308,45 @@ func (t TableComponent) View() string {
 			}
 
 			if isFullWidthRow && row.Cells[0] != "" {
-				// Render the full-width cell as-is without any padding or styling
 				b.WriteString(row.Cells[0])
 				b.WriteString("\n")
 			} else {
-				// Normal row rendering
+				// Pick spacer style once per row so the gap between columns
+				// also carries the selection background.
+				spacerStyle := normalCellStyle
+				if row.IsSelected {
+					spacerStyle = selectedCellStyle
+				}
+
 				for j, cell := range row.Cells {
 					if j < len(t.headers) {
-						// First column (index 0) is the status dot - render as-is without styling
 						if j == 0 && (strings.Contains(cell, "●") || strings.Contains(cell, "○")) {
-							b.WriteString(cell)
-							if t.headers[j].Width > 1 {
-								b.WriteString(normalCellStyle.Render(strings.Repeat(" ", t.headers[j].Width-1)))
+							if row.IsSelected {
+								// cell already contains ANSI codes — wrapping them
+								// with another Render produces invisible output on the
+								// blue bg. Extract the raw rune and re-render cleanly.
+								dotChar := "●"
+								if strings.Contains(cell, "○") {
+									dotChar = "○"
+								}
+								// dot is always 1 terminal cell wide; pad with spaces
+								// rather than padRight which slices by bytes and corrupts
+								// multi-byte Unicode runes like ● (3 bytes).
+								dotText := dotChar + strings.Repeat(" ", t.headers[j].Width-1)
+								b.WriteString(selectedCellStyle.Render(dotText))
+							} else {
+								b.WriteString(cell)
+								if t.headers[j].Width > 1 {
+									b.WriteString(normalCellStyle.Render(strings.Repeat(" ", t.headers[j].Width-1)))
+								}
 							}
 						} else {
-							// Apply alignment based on header
 							var cellText string
 							if t.headers[j].AlignRight {
 								cellText = padLeft(cell, t.headers[j].Width)
 							} else {
 								cellText = padRight(cell, t.headers[j].Width)
 							}
-
 							if row.IsSelected {
 								b.WriteString(selectedCellStyle.Render(cellText))
 							} else {
@@ -369,7 +354,7 @@ func (t TableComponent) View() string {
 							}
 						}
 						if j < len(t.headers)-1 {
-							b.WriteString(normalCellStyle.Render("  "))
+							b.WriteString(spacerStyle.Render("  "))
 						}
 					}
 				}
@@ -388,24 +373,16 @@ type ActionBarComponent struct {
 	width         int
 }
 
-func NewActionBarComponent() ActionBarComponent {
-	return ActionBarComponent{
-		width: 80,
-	}
-}
+func NewActionBarComponent() ActionBarComponent { return ActionBarComponent{width: 80} }
 
 func (a ActionBarComponent) WithWidth(width int) ActionBarComponent {
 	a.width = width - 2
 	return a
 }
 
-func (a ActionBarComponent) Init() tea.Cmd {
-	return nil
-}
+func (a ActionBarComponent) Init() tea.Cmd { return nil }
 
-func (a ActionBarComponent) Update(msg tea.Msg) (ActionBarComponent, tea.Cmd) {
-	return a, nil
-}
+func (a ActionBarComponent) Update(msg tea.Msg) (ActionBarComponent, tea.Cmd) { return a, nil }
 
 func (a ActionBarComponent) SetActions(actions string) ActionBarComponent {
 	a.actions = actions
@@ -420,43 +397,28 @@ func (a ActionBarComponent) SetStatusMessage(message string) ActionBarComponent 
 func (a ActionBarComponent) View() string {
 	var b strings.Builder
 
-	lineStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#999999")).
-		Background(lipgloss.Color("#0a0a0a"))
+	lineStyle := lipgloss.NewStyle().Foreground(ColorBorder)
+	statusStyle := lipgloss.NewStyle().Foreground(ColorHighlight)
+	errorStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#FF4444"))
 
-	statusStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#00FFFF")).
-		Background(lipgloss.Color("#0a0a0a"))
-
-	errorStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#FF0000")).
-		Background(lipgloss.Color("#0a0a0a"))
-
-	// Top line
 	b.WriteString(lineStyle.Render(strings.Repeat("─", a.width)))
 	b.WriteString("\n")
 
-	// Action bar content: show actions on left, status on right
 	if a.actions != "" {
-		// Actions string already contains ANSI codes from renderShortcut, render as-is
 		b.WriteString(a.actions)
 	}
 
-	// If we have a status message, show it on the right
 	if a.statusMessage != "" {
 		style := statusStyle
 		if strings.HasPrefix(a.statusMessage, "ERROR:") {
 			style = errorStyle
 		}
-
-		// Calculate spacing to push status to the right
 		actionsLen := len(stripAnsiCodes(a.actions))
 		statusLen := len(a.statusMessage)
-		spacing := a.width - actionsLen - statusLen - 2 // -2 for padding
+		spacing := a.width - actionsLen - statusLen - 2
 		if spacing < 1 {
 			spacing = 1
 		}
-
 		b.WriteString(strings.Repeat(" ", spacing))
 		b.WriteString(style.Render(a.statusMessage))
 	}
@@ -475,11 +437,7 @@ type DetailViewComponent struct {
 }
 
 func NewDetailViewComponent(title string, lines int) DetailViewComponent {
-	return DetailViewComponent{
-		title: title,
-		lines: lines,
-		width: 80,
-	}
+	return DetailViewComponent{title: title, lines: lines, width: 80}
 }
 
 func (d DetailViewComponent) WithWidth(width int) DetailViewComponent {
@@ -487,13 +445,9 @@ func (d DetailViewComponent) WithWidth(width int) DetailViewComponent {
 	return d
 }
 
-func (d DetailViewComponent) Init() tea.Cmd {
-	return nil
-}
+func (d DetailViewComponent) Init() tea.Cmd { return nil }
 
-func (d DetailViewComponent) Update(msg tea.Msg) (DetailViewComponent, tea.Cmd) {
-	return d, nil
-}
+func (d DetailViewComponent) Update(msg tea.Msg) (DetailViewComponent, tea.Cmd) { return d, nil }
 
 func (d DetailViewComponent) SetContent(content string) DetailViewComponent {
 	d.content = content
@@ -508,28 +462,12 @@ func (d DetailViewComponent) SetScroll(scroll int) DetailViewComponent {
 func (d DetailViewComponent) View() string {
 	var b strings.Builder
 
-	titleStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#FFFFFF")).
-		Background(lipgloss.Color("#0a0a0a")).
-		Bold(true)
+	titleStyle := lipgloss.NewStyle().Foreground(ColorBright).Bold(true)
+	helpStyle := lipgloss.NewStyle().Foreground(ColorNormal)
+	lineStyle := lipgloss.NewStyle().Foreground(ColorBorder)
+	contentStyle := lipgloss.NewStyle().Foreground(ColorNormal)
+	loadingStyle := lipgloss.NewStyle().Foreground(ColorEmpty)
 
-	helpStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#999999")).
-		Background(lipgloss.Color("#0a0a0a"))
-
-	lineStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#999999")).
-		Background(lipgloss.Color("#0a0a0a"))
-
-	contentStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#999999")).
-		Background(lipgloss.Color("#0a0a0a"))
-
-	loadingStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#444444")).
-		Background(lipgloss.Color("#0a0a0a"))
-
-	// Header
 	headerText := d.title
 	headerRight := "[ESC] Back"
 	headerSpacing := strings.Repeat(" ", d.width-len(headerText)-len(headerRight))
@@ -538,14 +476,11 @@ func (d DetailViewComponent) View() string {
 	b.WriteString(helpStyle.Render(headerRight))
 	b.WriteString("\n")
 
-	// Content divider
 	b.WriteString(lineStyle.Render(strings.Repeat("─", d.width)))
 	b.WriteString("\n")
 
-	// Content
 	if d.content == "" {
-		loadingMsg := " Loading..."
-		b.WriteString(loadingStyle.Render(loadingMsg))
+		b.WriteString(loadingStyle.Render(" Loading..."))
 		b.WriteString("\n")
 	} else {
 		lines := strings.Split(d.content, "\n")
@@ -553,7 +488,6 @@ func (d DetailViewComponent) View() string {
 		if end > len(lines) {
 			end = len(lines)
 		}
-
 		for i := d.scroll; i < end; i++ {
 			if i < len(lines) {
 				line := lines[i]
@@ -564,8 +498,6 @@ func (d DetailViewComponent) View() string {
 				b.WriteString("\n")
 			}
 		}
-
-		// Fill remaining lines
 		for i := end - d.scroll; i < d.lines; i++ {
 			b.WriteString("\n")
 		}
@@ -574,7 +506,7 @@ func (d DetailViewComponent) View() string {
 	return b.String()
 }
 
-// Strip ANSI escape codes for length calculation
+// stripAnsiCodes removes ANSI escape sequences for length calculation
 func stripAnsiCodes(str string) string {
 	result := str
 	for strings.Contains(result, "\x1b[") {
@@ -588,7 +520,6 @@ func stripAnsiCodes(str string) string {
 	return result
 }
 
-// padRight pads a string to the right with spaces
 func padRight(s string, width int) string {
 	if len(s) >= width {
 		return s[:width]
@@ -596,7 +527,6 @@ func padRight(s string, width int) string {
 	return s + strings.Repeat(" ", width-len(s))
 }
 
-// padLeft pads a string to the left with spaces
 func padLeft(s string, width int) string {
 	if len(s) >= width {
 		return s[:width]

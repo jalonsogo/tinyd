@@ -12,13 +12,31 @@ import (
 	"tinyd/internal/types"
 )
 
-// Color styles for status indicators
+// Status indicator styles — set by InitTheme, not at package init.
 var (
-	greenStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#00FF00"))
-	yellowStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFF00"))
-	redStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF0000"))
-	grayStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#999999"))
+	greenStyle  lipgloss.Style
+	yellowStyle lipgloss.Style
+	redStyle    lipgloss.Style
+	grayStyle   lipgloss.Style
 )
+
+func init() { InitTheme(true) } // default: dark
+
+// InitTheme sets status-indicator colors for dark or light terminals.
+// Call this before tea.NewProgram, after components.InitTheme.
+func InitTheme(dark bool) {
+	if dark {
+		greenStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#00DD00"))
+		yellowStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#DDDD00"))
+		redStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF4444"))
+		grayStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#666666"))
+	} else {
+		greenStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#007700"))
+		yellowStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#886600"))
+		redStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#CC0000"))
+		grayStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#888888"))
+	}
+}
 
 // View renders the UI
 func (m *Model) View() string {
@@ -477,22 +495,10 @@ func (m *Model) renderNetworksTab() string {
 func (m *Model) renderLogsView() string {
 	var b strings.Builder
 
-	titleStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#FFFFFF")).
-		Background(lipgloss.Color("#0a0a0a")).
-		Bold(true)
-
-	helpStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#999999")).
-		Background(lipgloss.Color("#0a0a0a"))
-
-	lineStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#999999")).
-		Background(lipgloss.Color("#0a0a0a"))
-
-	contentStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#999999")).
-		Background(lipgloss.Color("#0a0a0a"))
+	titleStyle := lipgloss.NewStyle().Foreground(components.ColorBright).Bold(true)
+	helpStyle := lipgloss.NewStyle().Foreground(components.ColorNormal)
+	lineStyle := lipgloss.NewStyle().Foreground(components.ColorBorder)
+	contentStyle := lipgloss.NewStyle().Foreground(components.ColorNormal)
 
 	// Header
 	headerText := "Logs"
@@ -553,22 +559,10 @@ func (m *Model) renderLogsView() string {
 func (m *Model) renderInspectView() string {
 	var b strings.Builder
 
-	titleStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#FFFFFF")).
-		Background(lipgloss.Color("#0a0a0a")).
-		Bold(true)
-
-	helpStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#999999")).
-		Background(lipgloss.Color("#0a0a0a"))
-
-	lineStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#999999")).
-		Background(lipgloss.Color("#0a0a0a"))
-
-	contentStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#999999")).
-		Background(lipgloss.Color("#0a0a0a"))
+	titleStyle := lipgloss.NewStyle().Foreground(components.ColorBright).Bold(true)
+	helpStyle := lipgloss.NewStyle().Foreground(components.ColorNormal)
+	lineStyle := lipgloss.NewStyle().Foreground(components.ColorBorder)
+	contentStyle := lipgloss.NewStyle().Foreground(components.ColorNormal)
 
 	// Header
 	headerText := "Inspect"
@@ -631,13 +625,8 @@ func (m *Model) getScrollIndicator(totalItems int) string {
 	}
 
 	var b strings.Builder
-	indicatorStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#666666")).
-		Background(lipgloss.Color("#0a0a0a"))
-
-	highlightStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#00FFFF")).
-		Background(lipgloss.Color("#0a0a0a"))
+	indicatorStyle := lipgloss.NewStyle().Foreground(components.ColorDim)
+	highlightStyle := lipgloss.NewStyle().Foreground(components.ColorHighlight)
 
 	b.WriteString("\n")
 
@@ -676,17 +665,9 @@ func (m *Model) getInspectScrollIndicator(totalLines, visibleLines int) string {
 	}
 
 	var b strings.Builder
-	indicatorStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#666666")).
-		Background(lipgloss.Color("#0a0a0a"))
-
-	highlightStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#00FFFF")).
-		Background(lipgloss.Color("#0a0a0a"))
-
-	lineStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#999999")).
-		Background(lipgloss.Color("#0a0a0a"))
+	indicatorStyle := lipgloss.NewStyle().Foreground(components.ColorDim)
+	highlightStyle := lipgloss.NewStyle().Foreground(components.ColorHighlight)
+	lineStyle := lipgloss.NewStyle().Foreground(components.ColorBorder)
 
 	// Separator line
 	b.WriteString(lineStyle.Render(strings.Repeat("─", m.width-2)))
@@ -722,13 +703,29 @@ func (m *Model) getInspectScrollIndicator(totalLines, visibleLines int) string {
 
 // colorizeJSON adds jq-style syntax highlighting to JSON output
 func colorizeJSON(jsonStr string) string {
-	// Color styles for JSON syntax highlighting
-	keyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#87CEEB"))      // Light blue for keys
-	stringStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#98C379"))   // Green for strings
-	numberStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#D19A66"))   // Orange for numbers
-	boolStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#E5C07B"))     // Yellow for booleans
-	nullStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#5C6370"))     // Gray for null
-	punctStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#ABB2BF"))    // Light gray for punctuation
+	var (
+		keyStyle    lipgloss.Style
+		stringStyle lipgloss.Style
+		numberStyle lipgloss.Style
+		boolStyle   lipgloss.Style
+		nullStyle   lipgloss.Style
+		punctStyle  lipgloss.Style
+	)
+	if components.DarkBackground {
+		keyStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#87CEEB"))
+		stringStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#98C379"))
+		numberStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#D19A66"))
+		boolStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#E5C07B"))
+		nullStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#5C6370"))
+		punctStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#ABB2BF"))
+	} else {
+		keyStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#005577"))
+		stringStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#226622"))
+		numberStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#884400"))
+		boolStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#774400"))
+		nullStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#888888"))
+		punctStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#444444"))
+	}
 
 	var result strings.Builder
 	var inString bool
@@ -845,11 +842,7 @@ func truncateWithEllipsis(s string, max int) string {
 
 // renderDeleteConfirmation renders an inline delete confirmation message
 func renderDeleteConfirmation(name string, selectedOption int) string {
-	// Delete message in white
-	confirmStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#FFFFFF")).
-		Background(lipgloss.Color("#0a0a0a")).
-		Bold(true)
+	confirmStyle := lipgloss.NewStyle().Foreground(components.ColorBright).Bold(true)
 
 	// Active YES button: black text on green background
 	yesActiveStyle := lipgloss.NewStyle().
@@ -861,10 +854,7 @@ func renderDeleteConfirmation(name string, selectedOption int) string {
 		Foreground(lipgloss.Color("#000000")).
 		Background(lipgloss.Color("#FF0000"))
 
-	// Inactive button: gray text, no background
-	inactiveStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#666666")).
-		Background(lipgloss.Color("#0a0a0a"))
+	inactiveStyle := lipgloss.NewStyle().Foreground(components.ColorDim)
 
 	var b strings.Builder
 	b.WriteString(confirmStyle.Render("Delete " + truncateWithEllipsis(name, 30) + "? "))
@@ -949,16 +939,8 @@ func (m *Model) getActionShortcuts() string {
 
 // renderShortcut formats a keyboard shortcut with underscored first letter
 func renderShortcut(key string, rest ...string) string {
-	// First letter: white with underline
-	keyStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#FFFFFF")).
-		Background(lipgloss.Color("#0a0a0a")).
-		Underline(true)
-
-	// Rest of word: dimmed gray
-	textStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#666666")).
-		Background(lipgloss.Color("#0a0a0a"))
+	keyStyle := lipgloss.NewStyle().Foreground(components.ColorBright).Underline(true)
+	textStyle := lipgloss.NewStyle().Foreground(components.ColorDim)
 
 	var b strings.Builder
 	b.WriteString(keyStyle.Render(key))

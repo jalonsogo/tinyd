@@ -1,6 +1,6 @@
 # 🐋 tinyd - Docker Terminal UI
 
-![tinyd Screenshot](tinyd.png)
+![tinyd mascot — a tiny geometric whale](tinyd.png)
 
 > A blazingly fast, beautifully minimal Terminal User Interface for Docker management. Built with Go and Bubble Tea.
 

@@ -2,7 +2,7 @@
 
 > A blazingly fast, beautifully minimal Terminal User Interface for Docker management
 
-![tinyd Screenshot](tinyd.png)
+![tinyd mascot — a tiny geometric whale](tinyd.png)
 
 ## Overview
 

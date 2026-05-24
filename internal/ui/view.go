@@ -174,8 +174,8 @@ func (m *Model) renderContainersTab() string {
 
 	headers := []components.TableHeader{
 		{Label: "", Width: 2, AlignRight: false},          // Status dot
-		{Label: "STATUS", Width: statusW, AlignRight: false},
 		{Label: "NAME", Width: nameFill, AlignRight: false},
+		{Label: "STATUS", Width: statusW, AlignRight: false},
 		{Label: "IMAGE", Width: imageFill, AlignRight: false},
 		{Label: "CPU", Width: 8, AlignRight: true},
 		{Label: "MEM", Width: 8, AlignRight: true},
@@ -217,7 +217,7 @@ func (m *Model) renderContainersTab() string {
 		// is drawn to active workloads. Selected rows keep full color so
 		// the highlight stays readable.
 		dimmed := c.Status != "RUNNING" && i != m.selectedRow
-		nameStr := truncateWithEllipsis(c.Name, headers[2].Width)
+		nameStr := truncateWithEllipsis(c.Name, headers[1].Width)
 		imageStr := truncateWithEllipsis(c.Image, headers[3].Width)
 		cpuStr := c.CPU
 		memStr := c.Mem
@@ -225,7 +225,7 @@ func (m *Model) renderContainersTab() string {
 
 		if dimmed {
 			dim := lipgloss.NewStyle().Foreground(components.ColorDim)
-			nameStr = dim.Render(padRightStr(nameStr, headers[2].Width))
+			nameStr = dim.Render(padRightStr(nameStr, headers[1].Width))
 			imageStr = dim.Render(padRightStr(imageStr, headers[3].Width))
 			cpuStr = dim.Render(padLeftStr(cpuStr, 8))
 			memStr = dim.Render(padLeftStr(memStr, 8))
@@ -234,8 +234,8 @@ func (m *Model) renderContainersTab() string {
 
 		cells := []string{
 			statusCell,
-			m.renderStatusCell(text, color, headers[1].Width, i == m.selectedRow),
 			nameStr,
+			m.renderStatusCell(text, color, headers[2].Width, i == m.selectedRow),
 			imageStr,
 			cpuStr,
 			memStr,
@@ -286,8 +286,8 @@ func (m *Model) renderImagesTab() string {
 
 	headers := []components.TableHeader{
 		{Label: "", Width: 2, AlignRight: false},              // Status dot
-		{Label: "STATUS", Width: statusW, AlignRight: false},
 		{Label: "REPOSITORY:TAG", Width: fillWidth, AlignRight: false},
+		{Label: "STATUS", Width: statusW, AlignRight: false},
 		{Label: "SIZE", Width: 10, AlignRight: true},
 		{Label: "CREATED", Width: 8, AlignRight: false},
 	}
@@ -322,8 +322,8 @@ func (m *Model) renderImagesTab() string {
 
 		// Only truncate if actually needed
 		repoTagCell := repoTag
-		if len(repoTag) > headers[2].Width {
-			repoTagCell = truncateWithEllipsis(repoTag, headers[2].Width)
+		if len(repoTag) > headers[1].Width {
+			repoTagCell = truncateWithEllipsis(repoTag, headers[1].Width)
 		}
 
 		statusCell := m.getImageStatusDot(img, i == m.selectedRow)
@@ -343,8 +343,8 @@ func (m *Model) renderImagesTab() string {
 		text, color := m.statusText(img.ID, stateKey)
 		cells := []string{
 			statusCell,
-			m.renderStatusCell(text, color, headers[1].Width, i == m.selectedRow),
 			repoTagCell,
+			m.renderStatusCell(text, color, headers[2].Width, i == m.selectedRow),
 			img.Size,
 			shortenTimeAgo(img.Created),
 		}
@@ -714,8 +714,8 @@ func (m *Model) renderModelsTab() string {
 
 	headers := []components.TableHeader{
 		{Label: "", Width: 2, AlignRight: false},
-		{Label: "STATUS", Width: statusW, AlignRight: false},
 		{Label: "REPOSITORY:TAG", Width: fillWidth, AlignRight: false},
+		{Label: "STATUS", Width: statusW, AlignRight: false},
 		{Label: "PARAMS", Width: 8, AlignRight: true},
 		{Label: "QUANT", Width: 8, AlignRight: false},
 		{Label: "SIZE", Width: 8, AlignRight: true},
@@ -753,8 +753,8 @@ func (m *Model) renderModelsTab() string {
 		text, color := m.statusText(ref, "MDL_AVAILABLE")
 		cells := []string{
 			dot,
-			m.renderStatusCell(text, color, headers[1].Width, i == m.selectedRow),
-			truncateWithEllipsis(ref, headers[2].Width),
+			truncateWithEllipsis(ref, headers[1].Width),
+			m.renderStatusCell(text, color, headers[2].Width, i == m.selectedRow),
 			defaultStr(mod.ParamSize, "--"),
 			defaultStr(mod.Quant, "--"),
 			defaultStr(mod.Size, "--"),

@@ -891,6 +891,8 @@ kbd {
   display: flex;
   align-items: center;
   gap: 8px;
+  padding-right: 64px;
+  min-height: 24px;
 }
 .install-card pre {
   margin: 0;
@@ -1094,7 +1096,7 @@ kbd {
   .hero { padding: 40px 20px 16px; }
   .section { padding: 72px 20px; }
   .hero-inner { grid-template-columns: 1fr; gap: 40px; }
-  .hero-mascot { width: 100px; height: 100px; bottom: -16px; right: -10px; }
+  .hero-mascot { width: 96px; height: 96px; bottom: -12px; right: 4px; padding: 14px; }
   .feature-grid { grid-template-columns: repeat(2, 1fr); }
   .install-grid { grid-template-columns: 1fr; }
   .keys-grid { grid-template-columns: repeat(2, 1fr); }
@@ -1105,12 +1107,69 @@ kbd {
 @media (max-width: 560px) {
   .feature-grid { grid-template-columns: 1fr; }
   .keys-grid { grid-template-columns: 1fr; }
-  .term-body { padding: 14px; min-height: 240px; }
-  .term-pre { font-size: 11px; min-height: 220px; }
-  .demo-body { font-size: 11px; padding: 12px; }
-  .demo-tabs { overflow-x: auto; }
-  .demo-tab { white-space: nowrap; }
+
+  /* hero terminal: shrink font + allow horizontal scroll so the 68-col frame fits */
+  .term-body { padding: 12px; min-height: 220px; }
+  .term-pre {
+    font-size: 10px;
+    line-height: 1.55;
+    min-height: 200px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  .term-pre::-webkit-scrollbar { display: none; }
+  .hero-mascot { display: none; }
+
+  /* hero text shouldn't be forced onto a hard line break that overflows */
+  .hero h1 br { display: none; }
+
+  /* demo: let the dense table scroll horizontally inside the terminal frame */
+  .demo-body {
+    font-size: 11px;
+    padding: 12px;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .demo-body .row { padding-left: 4px; padding-right: 4px; margin: 0 -4px; }
+  .demo-tabs {
+    overflow-x: auto;
+    scrollbar-width: none;
+    padding: 0 12px;
+  }
+  .demo-tabs::-webkit-scrollbar { display: none; }
+  .demo-tab { white-space: nowrap; padding: 10px 12px 11px; }
+  .demo-tabs-rest { display: none; }
+  .demo-statusbar { padding: 10px 14px; gap: 10px 14px; }
+
+  /* hero CTAs and meta */
+  .cta-row { gap: 10px; }
+  .cta-primary { padding: 11px 12px; }
   .cta-primary .cta-cmd { font-size: 12px; }
+  .cta-secondary { padding: 11px 4px; }
+  .hero-meta { gap: 18px 24px; }
+  .platform-row { gap: 6px 10px; font-size: 11px; }
+
+  /* install cards: room for the absolute copy button */
+  .install-card { padding: 16px; }
+  .install-card-head { padding-right: 56px; }
+  .install-card pre { font-size: 12px; padding-right: 0; }
+  .install-card .copy { top: 12px; right: 12px; }
+
+  /* feature wide title comfortably wraps */
+  .feature-wide { padding: 22px; }
+  .feature-wide h3 { font-size: 20px; }
+
+  /* who section keeps content inside the card on tiny screens */
+  .who-card { padding: 24px; }
+  .who-mascot { padding: 32px 20px; min-height: 180px; }
+}
+@media (max-width: 380px) {
+  .hero { padding: 32px 16px 16px; }
+  .section { padding: 56px 16px; }
+  .footer { padding: 24px 16px 40px; }
+  .term-pre { font-size: 9px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

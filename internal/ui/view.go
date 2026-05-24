@@ -22,20 +22,35 @@ var (
 
 func init() { InitTheme(true) } // default: dark
 
+// Status palette — kept in sync between InitTheme, statusTextStatic,
+// getStatusDot, getImageStatusDot, and getInUseDot so the dot and the text
+// label always render in the same color. Tuned to match the reference
+// design: a softer leaf green and a coral red instead of neon/full-bright.
+var (
+	statusGreen  lipgloss.Color
+	statusYellow lipgloss.Color
+	statusRed    lipgloss.Color
+	statusGray   lipgloss.Color
+)
+
 // InitTheme sets status-indicator colors for dark or light terminals.
 // Call this before tea.NewProgram, after components.InitTheme.
 func InitTheme(dark bool) {
 	if dark {
-		greenStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#00DD00"))
-		yellowStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#DDDD00"))
-		redStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF4444"))
-		grayStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#666666"))
+		statusGreen = lipgloss.Color("#5FBA60")
+		statusYellow = lipgloss.Color("#E5C07B")
+		statusRed = lipgloss.Color("#E54545")
+		statusGray = lipgloss.Color("#666666")
 	} else {
-		greenStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#007700"))
-		yellowStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#886600"))
-		redStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#CC0000"))
-		grayStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#888888"))
+		statusGreen = lipgloss.Color("#2E8B2E")
+		statusYellow = lipgloss.Color("#886600")
+		statusRed = lipgloss.Color("#C13030")
+		statusGray = lipgloss.Color("#888888")
 	}
+	greenStyle = lipgloss.NewStyle().Foreground(statusGreen)
+	yellowStyle = lipgloss.NewStyle().Foreground(statusYellow)
+	redStyle = lipgloss.NewStyle().Foreground(statusRed)
+	grayStyle = lipgloss.NewStyle().Foreground(statusGray)
 }
 
 // View renders the UI
@@ -197,14 +212,34 @@ func (m *Model) renderContainersTab() string {
 			statusCell = m.spinnerDot(i == m.selectedRow)
 		}
 		text, color := m.statusText(c.ID, c.Status)
+
+		// Dim non-running containers' Name/Image/CPU/Mem/Ports so the eye
+		// is drawn to active workloads. Selected rows keep full color so
+		// the highlight stays readable.
+		dimmed := c.Status != "RUNNING" && i != m.selectedRow
+		nameStr := truncateWithEllipsis(c.Name, headers[2].Width)
+		imageStr := truncateWithEllipsis(c.Image, headers[3].Width)
+		cpuStr := c.CPU
+		memStr := c.Mem
+		portsStr := truncateWithEllipsis(c.Ports, 15)
+
+		if dimmed {
+			dim := lipgloss.NewStyle().Foreground(components.ColorDim)
+			nameStr = dim.Render(padRightStr(nameStr, headers[2].Width))
+			imageStr = dim.Render(padRightStr(imageStr, headers[3].Width))
+			cpuStr = dim.Render(padLeftStr(cpuStr, 8))
+			memStr = dim.Render(padLeftStr(memStr, 8))
+			portsStr = dim.Render(padRightStr(portsStr, 15))
+		}
+
 		cells := []string{
 			statusCell,
 			m.renderStatusCell(text, color, headers[1].Width, i == m.selectedRow),
-			truncateWithEllipsis(c.Name, headers[2].Width),
-			truncateWithEllipsis(c.Image, headers[3].Width),
-			c.CPU,
-			c.Mem,
-			truncateWithEllipsis(c.Ports, 15),
+			nameStr,
+			imageStr,
+			cpuStr,
+			memStr,
+			portsStr,
 		}
 
 		rows = append(rows, components.TableRow{
@@ -1204,6 +1239,14 @@ func padRightStr(s string, width int) string {
 	return s + strings.Repeat(" ", width-len(s))
 }
 
+// padLeftStr left-pads a string with spaces up to width, truncating if longer.
+func padLeftStr(s string, width int) string {
+	if len(s) >= width {
+		return s[:width]
+	}
+	return strings.Repeat(" ", width-len(s)) + s
+}
+
 // Helper functions
 
 // getScrollIndicator returns a scroll indicator showing current position and scroll availability
@@ -1417,46 +1460,38 @@ func (m *Model) statusText(targetID, realStatus string) (string, lipgloss.Color)
 
 // statusTextStatic maps tinyd's internal status strings to (label, color).
 // Centralizing the mapping means every tab renders the same label for the
-// same state — no drift between containers/images/models.
+// same state — no drift between containers/images/models. Pulls colors
+// from the shared statusGreen/Yellow/Red/Gray palette set by InitTheme.
 func statusTextStatic(s string) (string, lipgloss.Color) {
-	dark := components.DarkBackground
-
-	green, yellow, red, gray := lipgloss.Color("#00DD00"), lipgloss.Color("#DDDD00"),
-		lipgloss.Color("#FF4444"), lipgloss.Color("#888888")
-	if !dark {
-		green, yellow, red, gray = lipgloss.Color("#007700"), lipgloss.Color("#886600"),
-			lipgloss.Color("#CC0000"), lipgloss.Color("#666666")
-	}
-
 	switch s {
 	// Containers
 	case "RUNNING":
-		return "RUNNING", green
+		return "RUNNING", statusGreen
 	case "STOPPED":
-		return "STOPPED", red
+		return "STOPPED", statusRed
 	case "PAUSED":
-		return "PAUSED", yellow
+		return "PAUSED", statusYellow
 	case "RESTARTING":
-		return "RESTARTING", yellow
+		return "RESTARTING", statusYellow
 	case "ERROR":
-		return "ERROR", red
+		return "ERROR", statusRed
 
 	// Images
 	case "IMG_IN_USE":
-		return "IN USE", green
+		return "IN USE", statusGreen
 	case "IMG_UNUSED":
-		return "UNUSED", gray
+		return "UNUSED", statusGray
 	case "IMG_DANGLING":
-		return "DANGLING", red
+		return "DANGLING", statusRed
 
 	// Models
 	case "MDL_AVAILABLE":
-		return "AVAILABLE", gray
+		return "AVAILABLE", statusGray
 	case "MDL_LOADED":
-		return "LOADED", green
+		return "LOADED", statusGreen
 
 	default:
-		return "—", gray
+		return "—", statusGray
 	}
 }
 
@@ -1475,70 +1510,38 @@ func (m *Model) renderStatusCell(text string, fg lipgloss.Color, width int, sele
 // When `selected` is true, the selection background is composited in so the
 // dot stays readable against the row highlight.
 func (m *Model) getStatusDot(status string, selected bool) string {
-	// Match the colors used by greenStyle/yellowStyle/redStyle/grayStyle so
-	// the appearance is identical between selected and non-selected rows.
-	dark := components.DarkBackground
-	var (
-		green  = lipgloss.Color("#00DD00")
-		yellow = lipgloss.Color("#DDDD00")
-		red    = lipgloss.Color("#FF4444")
-		gray   = lipgloss.Color("#666666")
-	)
-	if !dark {
-		green = lipgloss.Color("#007700")
-		yellow = lipgloss.Color("#886600")
-		red = lipgloss.Color("#CC0000")
-		gray = lipgloss.Color("#888888")
-	}
-
 	switch status {
 	case "RUNNING":
-		return dotStyle(green, selected).Render("●")
+		return dotStyle(statusGreen, selected).Render("●")
 	case "STOPPED":
-		return dotStyle(gray, selected).Render("○")
+		return dotStyle(statusGray, selected).Render("○")
 	case "PAUSED":
-		return dotStyle(yellow, selected).Render("●")
+		return dotStyle(statusYellow, selected).Render("●")
 	case "ERROR":
-		return dotStyle(red, selected).Render("●")
+		return dotStyle(statusRed, selected).Render("●")
 	case "RESTARTING":
-		return dotStyle(yellow, selected).Render("●")
+		return dotStyle(statusYellow, selected).Render("●")
 	default:
-		return dotStyle(gray, selected).Render("○")
+		return dotStyle(statusGray, selected).Render("○")
 	}
 }
 
 // getImageStatusDot returns a colored status indicator based on image status
 func (m *Model) getImageStatusDot(img types.Image, selected bool) string {
-	dark := components.DarkBackground
-	green := lipgloss.Color("#00DD00")
-	red := lipgloss.Color("#FF4444")
-	gray := lipgloss.Color("#666666")
-	if !dark {
-		green = lipgloss.Color("#007700")
-		red = lipgloss.Color("#CC0000")
-		gray = lipgloss.Color("#888888")
-	}
 	if img.InUse {
-		return dotStyle(green, selected).Render("●")
+		return dotStyle(statusGreen, selected).Render("●")
 	} else if img.Dangling {
-		return dotStyle(red, selected).Render("●")
+		return dotStyle(statusRed, selected).Render("●")
 	}
-	return dotStyle(gray, selected).Render("○")
+	return dotStyle(statusGray, selected).Render("○")
 }
 
 // getInUseDot returns a green ●/gray ○ for volumes & networks (in-use flag)
 func (m *Model) getInUseDot(inUse bool, selected bool) string {
-	dark := components.DarkBackground
-	green := lipgloss.Color("#00DD00")
-	gray := lipgloss.Color("#666666")
-	if !dark {
-		green = lipgloss.Color("#007700")
-		gray = lipgloss.Color("#888888")
-	}
 	if inUse {
-		return dotStyle(green, selected).Render("●")
+		return dotStyle(statusGreen, selected).Render("●")
 	}
-	return dotStyle(gray, selected).Render("○")
+	return dotStyle(statusGray, selected).Render("○")
 }
 
 // truncateWithEllipsis truncates a string to max length with ellipsis

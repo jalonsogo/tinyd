@@ -1407,9 +1407,10 @@ func dotStyle(fg lipgloss.Color, selected bool) lipgloss.Style {
 // The fallback chain is: action override → real state → "—".
 func (m *Model) statusText(targetID, realStatus string) (string, lipgloss.Color) {
 	if m.actionInProgress && m.actionTargetID == targetID && m.actionLabel != "" {
-		// actionLabel is "Verb <name>"; take the verb.
+		// actionLabel is "Verb <name>"; take the verb, uppercase for the
+		// STATUS column so it matches the static labels visually.
 		verb := strings.SplitN(m.actionLabel, " ", 2)[0]
-		return verb + "…", components.ColorHighlight
+		return strings.ToUpper(verb) + "…", components.ColorHighlight
 	}
 	return statusTextStatic(realStatus)
 }
@@ -1430,29 +1431,29 @@ func statusTextStatic(s string) (string, lipgloss.Color) {
 	switch s {
 	// Containers
 	case "RUNNING":
-		return "Running", green
+		return "RUNNING", green
 	case "STOPPED":
-		return "Stopped", gray
+		return "STOPPED", red
 	case "PAUSED":
-		return "Paused", yellow
+		return "PAUSED", yellow
 	case "RESTARTING":
-		return "Restarting", yellow
+		return "RESTARTING", yellow
 	case "ERROR":
-		return "Error", red
+		return "ERROR", red
 
 	// Images
 	case "IMG_IN_USE":
-		return "In use", green
+		return "IN USE", green
 	case "IMG_UNUSED":
-		return "Unused", gray
+		return "UNUSED", gray
 	case "IMG_DANGLING":
-		return "Dangling", red
+		return "DANGLING", red
 
 	// Models
 	case "MDL_AVAILABLE":
-		return "Available", gray
+		return "AVAILABLE", gray
 	case "MDL_LOADED":
-		return "Loaded", green
+		return "LOADED", green
 
 	default:
 		return "—", gray

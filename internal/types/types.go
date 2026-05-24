@@ -69,10 +69,12 @@ type EnvVar struct {
 
 // ImageSearchItem is a single Docker Hub search result
 type ImageSearchItem struct {
-	Name        string
-	Description string
-	Stars       int
-	Official    bool
+	Name          string
+	Description   string
+	Stars         int
+	Official      bool
+	Architectures []string // e.g. ["amd64","arm64"]
+	OperatingSys  []string // e.g. ["linux","windows"]
 }
 
 // Model represents a local Docker Model Runner model.
@@ -89,10 +91,11 @@ type Model struct {
 
 // ModelSearchItem is a hub search result for the ai/ namespace.
 type ModelSearchItem struct {
-	Name        string
-	Description string
-	Stars       int
-	Pulls       int
+	Name          string
+	Description   string
+	Stars         int
+	Pulls         int
+	Architectures []string
 }
 
 // Message types for Bubble Tea

@@ -1009,14 +1009,14 @@ func (m *Model) renderPullView() string {
 			break
 		}
 
-		// Column widths: stars(5) official(4) name(fill) description(rest)
+		// Column widths: stars(5) official(4) name(fill) arch(badges) description(rest)
 		totalWidth := m.width - 4
-		starsW, officialW := 7, 5
+		starsW, officialW, archW := 7, 5, 20
 		nameW := 30
-		if totalWidth-starsW-officialW-nameW-6 < 20 {
+		if totalWidth-starsW-officialW-archW-nameW-8 < 20 {
 			nameW = 20
 		}
-		descW := totalWidth - starsW - officialW - nameW - 6
+		descW := totalWidth - starsW - officialW - archW - nameW - 8
 		if descW < 10 {
 			descW = 10
 		}
@@ -1025,6 +1025,7 @@ func (m *Model) renderPullView() string {
 		header := padRightStr("★", starsW) + "  " +
 			padRightStr("OFF", officialW) + "  " +
 			padRightStr("NAME", nameW) + "  " +
+			padRightStr("ARCH", archW) + "  " +
 			padRightStr("DESCRIPTION", descW)
 		b.WriteString(dimStyle.Render(header))
 		b.WriteString("\n")
@@ -1044,15 +1045,24 @@ func (m *Model) renderPullView() string {
 			if r.Official {
 				official = "yes"
 			}
-			row := padRightStr(fmt.Sprintf("%d", r.Stars), starsW) + "  " +
+
+			// Build the plain row so the selection highlight covers the
+			// full width — but split out the arch column so we can paint
+			// each badge with its own background color independently.
+			rowPrefix := padRightStr(fmt.Sprintf("%d", r.Stars), starsW) + "  " +
 				padRightStr(official, officialW) + "  " +
-				padRightStr(truncateWithEllipsis(r.Name, nameW), nameW) + "  " +
-				padRightStr(truncateWithEllipsis(r.Description, descW), descW)
+				padRightStr(truncateWithEllipsis(r.Name, nameW), nameW) + "  "
+			archCell := renderArchBadges(r.Architectures, archW, i == m.pullSearchSelected)
+			rowSuffix := "  " + padRightStr(truncateWithEllipsis(r.Description, descW), descW)
 
 			if i == m.pullSearchSelected {
-				b.WriteString(selectedStyle.Render(row))
+				b.WriteString(selectedStyle.Render(rowPrefix))
+				b.WriteString(archCell)
+				b.WriteString(selectedStyle.Render(rowSuffix))
 			} else {
-				b.WriteString(normalStyle.Render(row))
+				b.WriteString(normalStyle.Render(rowPrefix))
+				b.WriteString(archCell)
+				b.WriteString(normalStyle.Render(rowSuffix))
 			}
 			b.WriteString("\n")
 		}
@@ -1094,6 +1104,75 @@ func max(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// renderArchBadges renders the supported architectures as compact pills
+// (`AMD64`, `ARM64`, ...) padded to a fixed visible width. Pads with spaces
+// on the selection background so the highlight stays continuous.
+func renderArchBadges(archs []string, width int, selected bool) string {
+	if width <= 0 {
+		return ""
+	}
+	pad := lipgloss.NewStyle().Foreground(components.ColorNormal)
+	if selected {
+		pad = lipgloss.NewStyle().Background(components.ColorSelectedBg).Foreground(components.ColorSelectedFg).Bold(true)
+	}
+
+	if len(archs) == 0 {
+		return pad.Render(strings.Repeat(" ", width))
+	}
+
+	var b strings.Builder
+	used := 0
+	first := true
+	for _, a := range archs {
+		label := strings.ToUpper(a) // amd64 → AMD64
+		// pill is `▕LABEL▏` — 2 framing chars + len(label). Skip if it
+		// won't fit.
+		pillW := len(label) + 2
+		needed := pillW
+		if !first {
+			needed += 1 // separator space
+		}
+		if used+needed > width {
+			break
+		}
+		if !first {
+			b.WriteString(pad.Render(" "))
+			used++
+		}
+		b.WriteString(archBadgeStyle(label, selected).Render("▕" + label + "▏"))
+		used += pillW
+		first = false
+	}
+	if used < width {
+		b.WriteString(pad.Render(strings.Repeat(" ", width-used)))
+	}
+	return b.String()
+}
+
+// archBadgeStyle picks a distinct color per common architecture so users
+// can scan the list quickly. Falls back to the highlight color for
+// anything unrecognized.
+func archBadgeStyle(label string, selected bool) lipgloss.Style {
+	var fg lipgloss.Color
+	switch label {
+	case "AMD64", "X86_64":
+		fg = lipgloss.Color("#E67E22") // warm orange — matches Hub UI vibe
+	case "ARM64", "AARCH64":
+		fg = lipgloss.Color("#3498DB")
+	case "ARM", "ARMV7":
+		fg = lipgloss.Color("#1ABC9C")
+	case "S390X", "PPC64LE", "RISCV64", "386", "I386":
+		fg = lipgloss.Color("#9B59B6")
+	default:
+		fg = components.ColorHighlight
+	}
+	s := lipgloss.NewStyle().Foreground(fg).Bold(true)
+	if selected {
+		s = s.Background(components.ColorSelectedBg)
+	}
+	return s
 }
 
 // padRightStr right-pads a string with spaces up to width, truncating if longer.

@@ -144,8 +144,9 @@ func (c *Client) PullModel(ctx context.Context, ref string) error {
 	return nil
 }
 
-// SearchModels searches Docker Hub's ai/ namespace for a term. Uses the
-// public Hub v2 search endpoint (no auth required for public listings).
+// SearchModels searches Docker Hub for models, restricted to the official
+// `ai/` namespace. Uses the Hub v3 catalog search (same as the Hub web UI)
+// so architectures and OS support come through in the same payload.
 func (c *Client) SearchModels(ctx context.Context, term string, limit int) ([]types.ModelSearchItem, error) {
 	if ctx == nil {
 		var cancel context.CancelFunc
@@ -156,15 +157,19 @@ func (c *Client) SearchModels(ctx context.Context, term string, limit int) ([]ty
 		limit = 25
 	}
 
-	// Docker Hub search; restrict to the official ai/ namespace.
 	q := strings.TrimSpace(term)
-	url := fmt.Sprintf("https://hub.docker.com/v2/search/repositories/?query=%s&page_size=%d", urlEscape(q), limit)
+	endpoint := fmt.Sprintf(
+		"https://hub.docker.com/api/search/v3/catalog/search?query=%s&type=image&size=%d&from=0",
+		urlEscape(q), limit,
+	)
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Search-Version", "v3")
+
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return nil, wrapErr(err, "search models")
@@ -174,28 +179,39 @@ func (c *Client) SearchModels(ctx context.Context, term string, limit int) ([]ty
 		return nil, fmt.Errorf("hub search failed (%d)", resp.StatusCode)
 	}
 
-	var raw struct {
+	var env struct {
 		Results []struct {
-			RepoName       string `json:"repo_name"`
-			ShortDesc      string `json:"short_description"`
-			StarCount      int    `json:"star_count"`
-			PullCount      int    `json:"pull_count"`
+			Name             string `json:"name"`
+			Slug             string `json:"slug"`
+			ShortDescription string `json:"short_description"`
+			StarCount        int    `json:"star_count"`
+			Architectures    []struct {
+				Name string `json:"name"`
+			} `json:"architectures"`
 		} `json:"results"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
+	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
 		return nil, wrapErr(err, "parse hub search")
 	}
 
-	out := make([]types.ModelSearchItem, 0, len(raw.Results))
-	for _, r := range raw.Results {
-		if !strings.HasPrefix(r.RepoName, "ai/") {
-			continue // only AI namespace
+	out := make([]types.ModelSearchItem, 0, len(env.Results))
+	for _, r := range env.Results {
+		name := r.Slug
+		if name == "" {
+			name = r.Name
+		}
+		if !strings.HasPrefix(name, "ai/") {
+			continue
+		}
+		archs := make([]string, 0, len(r.Architectures))
+		for _, a := range r.Architectures {
+			archs = append(archs, a.Name)
 		}
 		out = append(out, types.ModelSearchItem{
-			Name:        r.RepoName,
-			Description: r.ShortDesc,
-			Stars:       r.StarCount,
-			Pulls:       r.PullCount,
+			Name:          name,
+			Description:   r.ShortDescription,
+			Stars:         r.StarCount,
+			Architectures: archs,
 		})
 	}
 	return out, nil

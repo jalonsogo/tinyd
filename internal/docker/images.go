@@ -70,17 +70,28 @@ func (c *Client) DeleteImage(ctx context.Context, imageID string, force bool) er
 }
 
 // SearchImages searches Docker Hub for images matching the given term.
+//
+// Uses Hub's v3 catalog search rather than the daemon's `/images/search`
+// proxy because v3 returns the supported architectures and operating
+// systems per repo — info we want to surface as a badge in the pull view.
+// Falls back to the daemon's search if Hub v3 is unreachable, so the
+// feature degrades gracefully on air-gapped setups.
 func (c *Client) SearchImages(ctx context.Context, term string, limit int) ([]types.ImageSearchItem, error) {
 	if ctx == nil {
 		var cancel context.CancelFunc
 		ctx, cancel = c.WithCustomTimeout(TimeoutMedium)
 		defer cancel()
 	}
-
 	if limit <= 0 {
 		limit = 25
 	}
 
+	if items, err := searchHubV3(ctx, term, limit); err == nil {
+		return items, nil
+	}
+
+	// Fallback: daemon's `/images/search` proxy. Loses arch info but at
+	// least keeps the feature usable when Hub v3 is blocked.
 	result, err := c.cli.ImageSearch(ctx, term, client.ImageSearchOptions{Limit: limit})
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {

@@ -76,9 +76,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		items := make([]types.ImageSearchItem, 0, len(msg))
 		for _, r := range msg {
 			items = append(items, types.ImageSearchItem{
-				Name:        r.Name,
-				Description: r.Description,
-				Stars:       r.Stars,
+				Name:          r.Name,
+				Description:   r.Description,
+				Stars:         r.Stars,
+				Architectures: r.Architectures,
 			})
 		}
 		m.pullSearchResults = items

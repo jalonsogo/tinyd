@@ -898,7 +898,10 @@ kbd {
   font-size: 13px;
   line-height: 1.7;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
   color: var(--fg);
+  padding-right: 60px;
 }
 .install-card .c { color: var(--green); }
 .install-card .copy {

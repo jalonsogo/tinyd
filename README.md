@@ -1,6 +1,12 @@
-# 🐋 tinyd - Docker Terminal UI
+<h1 align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset=".github/assets/logo-dark.png">
+    <source media="(prefers-color-scheme: light)" srcset=".github/assets/logo-light.png">
+    <img alt="tinyd — tiny Docker TUI" src=".github/assets/logo-light.png" width="420">
+  </picture>
+</h1>
 
-![tinyd mascot — a tiny geometric whale](tinyd.png)
+<p align="center"><strong>tinyd. Tiny Docker TUI.</strong></p>
 
 > A blazingly fast, beautifully minimal Terminal User Interface for Docker management. Built with Go and Bubble Tea.
 

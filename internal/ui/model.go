@@ -118,8 +118,10 @@ type Model struct {
 	detailView components.DetailViewComponent
 }
 
-// NewModel creates an initial model with default state
-func NewModel() (*Model, error) {
+// NewModel creates an initial model with default state. version is the build
+// version (set via -ldflags in releases, "dev" otherwise) and is shown in
+// the header.
+func NewModel(version string) (*Model, error) {
 	// Create Docker client
 	dockerClient, err := docker.NewClient()
 	if err != nil {
@@ -148,7 +150,7 @@ func NewModel() (*Model, error) {
 		currentView:    types.ViewModeList,
 
 		// Initialize components
-		header:     components.NewHeaderComponent("tinyd v2.0.1", "[F1] Help [Q]uit"),
+		header:     components.NewHeaderComponent("tinyd "+version, "[F1] Help [Q]uit"),
 		tabs:       components.NewTabsComponent(tabs, 0),
 		actionBar:  components.NewActionBarComponent(),
 		detailView: components.NewDetailViewComponent("", 15),

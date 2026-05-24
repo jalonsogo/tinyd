@@ -48,21 +48,31 @@
 
 ## 🚀 Quick Start
 
+### Download a release
+
+Grab the latest binary from the [Releases page](https://github.com/jalonsogo/tinyd/releases) — prebuilt for macOS, Linux, and Windows on both `amd64` and `arm64`.
+
 ```bash
-# Clone the repository
+# macOS / Linux
+tar -xzf tinyd_*_macOS_arm64.tar.gz
+./tinyd
+
+# Windows
+# Unzip the .zip and run tinyd.exe
+```
+
+### Build from source
+
+```bash
 git clone https://github.com/jalonsogo/tinyd.git
 cd tinyd
-
-# Build the binary
 go build -o tinyd
-
-# Run it!
 ./tinyd
 ```
 
 ### Prerequisites
 
-- Go 1.19 or higher
+- Go 1.24+ (only for `go build`; not needed for the prebuilt binary)
 - Docker daemon running (local or remote)
 - Terminal with Unicode support
 

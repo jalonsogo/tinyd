@@ -12,6 +12,14 @@ import (
 	"tinyd/internal/ui"
 )
 
+// Populated at build time via -ldflags by GoReleaser (or whichever tool runs
+// the build). Defaults to "dev" for plain `go build` / `go run`.
+var (
+	version = "dev"
+	commit  = ""
+	date    = ""
+)
+
 // detectDark probes several reliable signals before falling back to lipgloss.
 // When OSC-11 is unsupported (common on macOS Terminal.app), lipgloss returns
 // true (dark) by default — incorrectly flagging light terminals. We check
@@ -48,12 +56,28 @@ func detectDark() bool {
 }
 
 func main() {
+	// --version / -v short-circuit so users can `tinyd --version` from a
+	// release tarball without going through the TUI handshake.
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "--version", "-v", "version":
+			fmt.Printf("tinyd %s\n", version)
+			if commit != "" {
+				fmt.Printf("commit %s\n", commit)
+			}
+			if date != "" {
+				fmt.Printf("built  %s\n", date)
+			}
+			return
+		}
+	}
+
 	dark := detectDark()
 
 	components.InitTheme(dark)
 	ui.InitTheme(dark)
 
-	model, err := ui.NewModel()
+	model, err := ui.NewModel(version)
 	if err != nil {
 		fmt.Printf("Error initializing: %v\n", err)
 		os.Exit(1)

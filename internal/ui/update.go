@@ -21,6 +21,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.containers = msg
 		m.loading = false
 		m.actionInProgress = false
+		m.err = nil // any list arriving means the daemon is back up
 		// Keep selection in bounds
 		if m.activeTab == 0 && m.selectedRow >= len(m.containers) && len(m.containers) > 0 {
 			m.selectedRow = len(m.containers) - 1
@@ -29,6 +30,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case types.ImageListMsg:
 		m.images = msg
+		m.err = nil
 		// Keep selection in bounds
 		if m.activeTab == 1 && m.selectedRow >= len(m.images) && len(m.images) > 0 {
 			m.selectedRow = len(m.images) - 1
@@ -37,6 +39,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case types.VolumeListMsg:
 		m.volumes = msg
+		m.err = nil
 		// Keep selection in bounds
 		if m.activeTab == 2 && m.selectedRow >= len(m.volumes) && len(m.volumes) > 0 {
 			m.selectedRow = len(m.volumes) - 1
@@ -45,6 +48,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case types.NetworkListMsg:
 		m.networks = msg
+		m.err = nil
 		// Keep selection in bounds
 		if m.activeTab == 3 && m.selectedRow >= len(m.networks) && len(m.networks) > 0 {
 			m.selectedRow = len(m.networks) - 1
@@ -230,6 +234,12 @@ func (m *Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.lastCtrlC = now
 		m.statusMessage = "Press Ctrl+C again to exit"
 		return m, nil
+	}
+
+	// q quits when the error screen is showing (no other context uses q yet
+	// — the regular list view doesn't bind it, so this won't shadow anything).
+	if m.err != nil && (key == "q" || key == "Q") {
+		return m, tea.Quit
 	}
 
 	// Global keys (work in all modes)

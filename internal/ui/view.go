@@ -41,7 +41,7 @@ func InitTheme(dark bool) {
 // View renders the UI
 func (m *Model) View() string {
 	if m.err != nil {
-		return fmt.Sprintf("Error: %v\n\nPress q to quit", m.err)
+		return m.renderErrorScreen()
 	}
 
 	// Render based on current view mode
@@ -504,6 +504,119 @@ func (m *Model) renderNetworksTab() string {
 	// Add scroll indicator
 	scrollInfo := m.getScrollIndicator(len(m.networks))
 	return table.View() + scrollInfo
+}
+
+// renderErrorScreen displays a fatal-ish error in a readable layout.
+// Detects the common "Docker daemon unreachable" case and shows a friendly
+// diagnosis + remediation; falls back to a wrapped raw message otherwise.
+func (m *Model) renderErrorScreen() string {
+	titleStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#FF4444")).Bold(true)
+	headingStyle := lipgloss.NewStyle().Foreground(components.ColorBright).Bold(true)
+	bodyStyle := lipgloss.NewStyle().Foreground(components.ColorNormal)
+	dimStyle := lipgloss.NewStyle().Foreground(components.ColorDim)
+	codeStyle := lipgloss.NewStyle().Foreground(components.ColorHighlight)
+
+	errText := m.err.Error()
+	dockerDown := looksLikeDockerDown(errText)
+
+	var b strings.Builder
+	b.WriteString("\n")
+
+	if dockerDown {
+		b.WriteString("  ")
+		b.WriteString(titleStyle.Render("✕  Can't reach Docker"))
+		b.WriteString("\n\n")
+		b.WriteString("  ")
+		b.WriteString(bodyStyle.Render("tinyd tried to talk to the Docker daemon and got no response."))
+		b.WriteString("\n  ")
+		b.WriteString(bodyStyle.Render("Most likely the daemon isn't running yet."))
+		b.WriteString("\n\n")
+		b.WriteString("  ")
+		b.WriteString(headingStyle.Render("Try one of:"))
+		b.WriteString("\n  ")
+		b.WriteString(bodyStyle.Render("• Start Docker Desktop"))
+		b.WriteString("\n  ")
+		b.WriteString(bodyStyle.Render("• "))
+		b.WriteString(codeStyle.Render("sudo systemctl start docker"))
+		b.WriteString(dimStyle.Render("   (Linux)"))
+		b.WriteString("\n  ")
+		b.WriteString(bodyStyle.Render("• "))
+		b.WriteString(codeStyle.Render("export DOCKER_HOST=tcp://…"))
+		b.WriteString(dimStyle.Render("   (remote daemon)"))
+		b.WriteString("\n\n")
+		b.WriteString("  ")
+		b.WriteString(dimStyle.Render("Original error:"))
+		b.WriteString("\n")
+		b.WriteString(wrapForDisplay(errText, m.width-4, "  "))
+		b.WriteString("\n\n")
+		b.WriteString("  ")
+		b.WriteString(dimStyle.Render("Auto-retrying every 5s — leave this window open and tinyd will"))
+		b.WriteString("\n  ")
+		b.WriteString(dimStyle.Render("pick up the daemon as soon as it's reachable."))
+	} else {
+		b.WriteString("  ")
+		b.WriteString(titleStyle.Render("✕  Something went wrong"))
+		b.WriteString("\n\n")
+		b.WriteString(wrapForDisplay(errText, m.width-4, "  "))
+	}
+
+	b.WriteString("\n\n  ")
+	b.WriteString(dimStyle.Render("Press "))
+	b.WriteString(codeStyle.Render("q"))
+	b.WriteString(dimStyle.Render(" or "))
+	b.WriteString(codeStyle.Render("Ctrl+C"))
+	b.WriteString(dimStyle.Render(" to quit."))
+	b.WriteString("\n")
+	return b.String()
+}
+
+// looksLikeDockerDown reports whether an error string is the unmistakable
+// "I can't reach the daemon" shape, so we can swap the generic stack-trace
+// look for a remediation message.
+func looksLikeDockerDown(s string) bool {
+	low := strings.ToLower(s)
+	for _, needle := range []string{
+		"failed to connect to the docker api",
+		"cannot connect to the docker daemon",
+		"dial unix",
+		"connection refused",
+		"no such file or directory",
+		"is the docker daemon running",
+	} {
+		if strings.Contains(low, needle) {
+			return true
+		}
+	}
+	return false
+}
+
+// wrapForDisplay wraps a long single-line error across the available width
+// with a constant left indent, so we don't dump a 2000-char string onto a
+// 100-column terminal and let the renderer truncate it mid-word.
+func wrapForDisplay(s string, width int, indent string) string {
+	if width < 20 {
+		width = 20
+	}
+	dim := lipgloss.NewStyle().Foreground(components.ColorDim)
+
+	words := strings.Fields(s)
+	var b strings.Builder
+	line := indent
+	for _, w := range words {
+		if len(line)+1+len(w) > width && len(line) > len(indent) {
+			b.WriteString(dim.Render(line))
+			b.WriteString("\n")
+			line = indent
+		}
+		if len(line) > len(indent) {
+			line += " "
+		}
+		line += w
+	}
+	if len(line) > len(indent) {
+		b.WriteString(dim.Render(line))
+	}
+	return b.String()
 }
 
 // renderModelsTab renders the Models tab (Docker Model Runner).

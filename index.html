@@ -52,10 +52,11 @@
       <section class="hero">
         <div class="hero-inner">
           <div class="hero-copy">
-            <div class="badge">
+            <a class="badge badge-link" href="https://github.com/jalonsogo/tinyd/releases/tag/v0.2.0" target="_blank" rel="noopener">
               <span class="badge-dot"></span>
-              <span>v0.1 · written mostly by Claude</span>
-            </div>
+              <span>v0.2.0 · released 2026-05-24</span>
+              <span class="badge-arrow" aria-hidden="true">↗</span>
+            </a>
             <h1>
               A <span class="accent-green">tiny</span> Docker Desktop<br />
               that lives in your&nbsp;<span class="mono-word accent-green">terminal<span class="hero-cursor" aria-hidden="true">▌</span></span>
@@ -67,19 +68,23 @@
             </p>
 
             <div class="cta-row">
-              <button class="cta-primary" data-copy="go install github.com/jalonsogo/tinyd@latest" aria-label="Copy install command">
-                <span class="prompt">$</span>
-                <span class="cta-cmd">go install github.com/jalonsogo/tinyd@latest</span>
-                <span class="cta-icon" aria-hidden="true">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <rect x="9" y="9" width="13" height="13" rx="2"/>
-                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
-                  </svg>
-                </span>
-              </button>
+              <a class="cta-primary cta-download" href="https://github.com/jalonsogo/tinyd/releases/latest" target="_blank" rel="noopener">
+                <span class="prompt">↓</span>
+                <span class="cta-cmd">Download tinyd</span>
+                <span class="cta-version">v0.2.0</span>
+              </a>
               <a class="cta-secondary" href="https://github.com/jalonsogo/tinyd" target="_blank" rel="noopener">
                 view on github →
               </a>
+            </div>
+            <div class="platform-row" aria-label="Download for your platform">
+              <span class="platform-label">binaries:</span>
+              <a class="platform-link" href="https://github.com/jalonsogo/tinyd/releases/download/v0.2.0/tinyd_0.2.0_macOS_arm64.tar.gz">macOS · arm64</a>
+              <a class="platform-link" href="https://github.com/jalonsogo/tinyd/releases/download/v0.2.0/tinyd_0.2.0_macOS_amd64.tar.gz">macOS · amd64</a>
+              <a class="platform-link" href="https://github.com/jalonsogo/tinyd/releases/download/v0.2.0/tinyd_0.2.0_linux_amd64.tar.gz">linux · amd64</a>
+              <a class="platform-link" href="https://github.com/jalonsogo/tinyd/releases/download/v0.2.0/tinyd_0.2.0_linux_arm64.tar.gz">linux · arm64</a>
+              <a class="platform-link" href="https://github.com/jalonsogo/tinyd/releases/download/v0.2.0/tinyd_0.2.0_windows_amd64.zip">windows · amd64</a>
+              <a class="platform-link" href="https://github.com/jalonsogo/tinyd/releases/download/v0.2.0/tinyd_0.2.0_windows_arm64.zip">windows · arm64</a>
             </div>
 
             <ul class="hero-meta">
@@ -284,12 +289,19 @@
 
         <div class="install-grid">
           <div class="install-card">
-            <div class="install-card-head"><span class="green">●</span> clone &amp; build</div>
-            <pre><code><span class="c">$</span> git clone https://github.com/jalonsogo/tinyd.git
-<span class="c">$</span> cd tinyd
-<span class="c">$</span> go build -o tinyd
+            <div class="install-card-head"><span class="green">●</span> download binary <span class="install-version">v0.2.0</span></div>
+            <pre><code><span class="c c-comment"># macOS · Apple Silicon</span>
+<span class="c">$</span> curl -L https://github.com/jalonsogo/tinyd/releases/download/v0.2.0/tinyd_0.2.0_macOS_arm64.tar.gz | tar xz
 <span class="c">$</span> ./tinyd</code></pre>
-            <button class="copy" data-copy="git clone https://github.com/jalonsogo/tinyd.git&#10;cd tinyd&#10;go build -o tinyd&#10;./tinyd">copy</button>
+            <button class="copy" data-copy="curl -L https://github.com/jalonsogo/tinyd/releases/download/v0.2.0/tinyd_0.2.0_macOS_arm64.tar.gz | tar xz&#10;./tinyd">copy</button>
+          </div>
+
+          <div class="install-card">
+            <div class="install-card-head"><span class="cyan">●</span> build from source</div>
+            <pre><code><span class="c">$</span> git clone https://github.com/jalonsogo/tinyd.git
+<span class="c">$</span> cd tinyd &amp;&amp; go build -o tinyd
+<span class="c">$</span> ./tinyd</code></pre>
+            <button class="copy" data-copy="git clone https://github.com/jalonsogo/tinyd.git&#10;cd tinyd &amp;&amp; go build -o tinyd&#10;./tinyd">copy</button>
           </div>
 
           <div class="install-card">
@@ -297,13 +309,6 @@
             <pre><code><span class="c">$</span> export DOCKER_HOST=tcp://host:2376
 <span class="c">$</span> ./tinyd</code></pre>
             <button class="copy" data-copy="export DOCKER_HOST=tcp://host:2376&#10;./tinyd">copy</button>
-          </div>
-
-          <div class="install-card">
-            <div class="install-card-head"><span class="cyan">●</span> docker desktop</div>
-            <pre><code><span class="c">#</span> autodetected on macOS / Windows
-<span class="c">$</span> ./tinyd</code></pre>
-            <button class="copy" data-copy="./tinyd">copy</button>
           </div>
         </div>
       </section>

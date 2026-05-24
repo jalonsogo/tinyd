@@ -216,12 +216,24 @@ main { display: block; }
   font-family: var(--mono);
   font-size: 12px;
   color: var(--fg-dim);
-  padding: 6px 10px;
+  padding: 6px 12px;
   border: 1px solid var(--line);
   border-radius: 999px;
   background: var(--bg-2);
   margin-bottom: 22px;
+  transition: border-color .15s ease, color .15s ease;
 }
+.badge-link { text-decoration: none; }
+.badge-link:hover {
+  color: var(--fg);
+  border-color: var(--green);
+}
+.badge-arrow {
+  color: var(--fg-faint);
+  font-size: 10px;
+  margin-left: 2px;
+}
+.badge-link:hover .badge-arrow { color: var(--green); }
 .badge-dot {
   width: 7px; height: 7px; border-radius: 50%;
   background: var(--green);
@@ -278,15 +290,71 @@ main { display: block; }
   padding: 12px 14px;
   border-radius: 8px;
   cursor: pointer;
-  transition: border-color .15s ease, transform .1s ease;
+  transition: border-color .15s ease, transform .1s ease, background .15s ease;
+  text-decoration: none;
 }
 .cta-primary:hover { border-color: var(--green); }
 .cta-primary:active { transform: translateY(1px); }
-.cta-primary .prompt { color: var(--green); font-weight: 700; }
+.cta-primary .prompt { color: var(--green); font-weight: 700; font-size: 16px; }
 .cta-primary .cta-cmd { color: var(--fg); }
 .cta-primary .cta-icon { color: var(--fg-dim); display: inline-flex; }
 .cta-primary.is-copied .cta-icon { color: var(--green); }
 .cta-primary.is-copied .cta-cmd::after { content: " ✓ copied"; color: var(--green); }
+
+.cta-download {
+  background: var(--green);
+  border-color: var(--green);
+  color: var(--bg);
+}
+.cta-download:hover {
+  background: #62e895;
+  border-color: #62e895;
+}
+.cta-download .prompt { color: var(--bg); }
+.cta-download .cta-cmd { color: var(--bg); font-weight: 700; }
+.cta-version {
+  font-size: 11px;
+  padding: 2px 7px;
+  background: rgba(10, 14, 20, 0.18);
+  color: var(--bg);
+  border-radius: 4px;
+  font-weight: 600;
+}
+
+.platform-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--fg-faint);
+  margin-bottom: 30px;
+}
+.platform-label { color: var(--fg-faint); text-transform: lowercase; }
+.platform-link {
+  color: var(--fg-dim);
+  padding: 3px 9px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--bg-2);
+  transition: color .15s ease, border-color .15s ease;
+}
+.platform-link:hover {
+  color: var(--green);
+  border-color: var(--green);
+}
+
+.install-version {
+  margin-left: auto;
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(74, 222, 128, 0.1);
+  color: var(--green);
+}
+.install-card-head { justify-content: space-between; }
+.c-comment { color: var(--fg-faint) !important; }
 
 .cta-secondary {
   font-family: var(--mono);

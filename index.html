@@ -1,0 +1,413 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>tinyd — a tiny Docker Desktop in your terminal</title>
+    <meta
+      name="description"
+      content="tinyd is a blazingly fast, beautifully minimal Terminal UI for Docker. Containers, images, volumes, networks — all from your keyboard."
+    />
+    <meta property="og:title" content="tinyd — a tiny Docker Desktop in your terminal" />
+    <meta
+      property="og:description"
+      content="A blazingly fast, beautifully minimal Terminal UI for Docker management. Built with Go and Bubble Tea."
+    />
+    <meta property="og:image" content="logo/tinyd@2x.png" />
+    <meta property="og:type" content="website" />
+    <link rel="icon" type="image/svg+xml" href="logo/favicon.svg" />
+    <link rel="alternate icon" href="logo/tinyd@2x.png" />
+    <link rel="apple-touch-icon" href="logo/favicon.svg" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="scanlines" aria-hidden="true"></div>
+
+    <header class="nav">
+      <a class="brand" href="#">
+        <img class="brand-logo" src="logo/tinyd.svg" alt="tinyd logo" width="28" height="28" />
+        <span class="brand-mark">tinyd</span>
+        <span class="brand-cursor" aria-hidden="true">▌</span>
+      </a>
+      <nav class="nav-links">
+        <a href="#features">features</a>
+        <a href="#demo">demo</a>
+        <a href="#install">install</a>
+        <a href="#keys">keys</a>
+        <a class="nav-cta" href="https://github.com/jalonsogo/tinyd" target="_blank" rel="noopener">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path d="M12 .5C5.65.5.5 5.65.5 12c0 5.08 3.29 9.39 7.86 10.91.58.11.79-.25.79-.55v-2.13c-3.2.7-3.88-1.37-3.88-1.37-.52-1.33-1.27-1.68-1.27-1.68-1.04-.71.08-.7.08-.7 1.15.08 1.76 1.18 1.76 1.18 1.03 1.76 2.69 1.25 3.34.96.1-.74.4-1.25.73-1.54-2.55-.29-5.24-1.28-5.24-5.69 0-1.26.45-2.29 1.18-3.1-.12-.29-.51-1.45.11-3.03 0 0 .96-.31 3.16 1.18.92-.26 1.9-.39 2.88-.39.98 0 1.96.13 2.88.39 2.2-1.49 3.16-1.18 3.16-1.18.62 1.58.23 2.74.11 3.03.73.81 1.18 1.84 1.18 3.1 0 4.42-2.7 5.39-5.27 5.68.41.36.78 1.07.78 2.17v3.22c0 .31.21.67.8.55C20.21 21.39 23.5 17.08 23.5 12 23.5 5.65 18.35.5 12 .5z"/>
+          </svg>
+          github
+        </a>
+      </nav>
+    </header>
+
+    <main>
+      <!-- HERO -->
+      <section class="hero">
+        <div class="hero-inner">
+          <div class="hero-copy">
+            <div class="badge">
+              <span class="badge-dot"></span>
+              <span>v0.1 · written mostly by Claude</span>
+            </div>
+            <h1>
+              A <span class="accent-green">tiny</span> Docker Desktop<br />
+              that lives in your&nbsp;<span class="mono-word accent-green">terminal<span class="hero-cursor" aria-hidden="true">▌</span></span>
+            </h1>
+            <p class="lede">
+              Containers, images, volumes and networks — managed with a keystroke.
+              No browser tabs. No memorized flags. Just a beautifully minimal TUI
+              that adapts to any pane.
+            </p>
+
+            <div class="cta-row">
+              <button class="cta-primary" data-copy="go install github.com/jalonsogo/tinyd@latest" aria-label="Copy install command">
+                <span class="prompt">$</span>
+                <span class="cta-cmd">go install github.com/jalonsogo/tinyd@latest</span>
+                <span class="cta-icon" aria-hidden="true">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="9" y="9" width="13" height="13" rx="2"/>
+                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                  </svg>
+                </span>
+              </button>
+              <a class="cta-secondary" href="https://github.com/jalonsogo/tinyd" target="_blank" rel="noopener">
+                view on github →
+              </a>
+            </div>
+
+            <ul class="hero-meta">
+              <li><span class="meta-k">stack</span><span class="meta-v">Go · Bubble Tea · Lipgloss</span></li>
+              <li><span class="meta-k">size</span><span class="meta-v">60×13 min</span></li>
+              <li><span class="meta-k">deps</span><span class="meta-v">Docker daemon</span></li>
+            </ul>
+          </div>
+
+          <!-- Animated terminal -->
+          <div class="hero-term">
+            <div class="term" id="term">
+              <div class="term-chrome">
+                <span class="dot red"></span>
+                <span class="dot yellow"></span>
+                <span class="dot green"></span>
+                <span class="term-title">~/projects — tinyd</span>
+              </div>
+              <div class="term-body">
+                <pre class="term-pre" id="term-pre"></pre>
+              </div>
+            </div>
+            <div class="hero-mascot" aria-hidden="true">
+              <img src="logo/tinyd.svg" alt="tinyd whale logo" />
+            </div>
+          </div>
+        </div>
+
+        <div class="marquee" aria-hidden="true">
+          <div class="marquee-track">
+            <span>k9s vibes ✓</span><span>·</span>
+            <span>lazydocker energy ✓</span><span>·</span>
+            <span>vscode terminal ✓</span><span>·</span>
+            <span>iterm2 ✓</span><span>·</span>
+            <span>alacritty ✓</span><span>·</span>
+            <span>wezterm ✓</span><span>·</span>
+            <span>k9s vibes ✓</span><span>·</span>
+            <span>lazydocker energy ✓</span><span>·</span>
+            <span>vscode terminal ✓</span><span>·</span>
+            <span>iterm2 ✓</span><span>·</span>
+            <span>alacritty ✓</span><span>·</span>
+            <span>wezterm ✓</span><span>·</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- FEATURES -->
+      <section id="features" class="section">
+        <div class="section-head">
+          <span class="kicker"># features</span>
+          <h2>Everything you reach for, one keypress away.</h2>
+          <p>
+            Four tabs. Live stats. Deep inspection. tinyd treats Docker the way
+            <code>top</code> treats processes — fast, focused, fluent.
+          </p>
+        </div>
+
+        <div class="feature-grid">
+          <article class="feature">
+            <div class="feature-icon" data-icon="containers">
+              <span class="dot-led green"></span>
+              <span class="dot-led green"></span>
+              <span class="dot-led red"></span>
+            </div>
+            <h3>Containers</h3>
+            <p>
+              Real-time CPU and memory. Start, stop, restart, exec, logs and open
+              exposed ports straight into your browser.
+            </p>
+            <ul class="feature-keys">
+              <li><kbd>s</kbd> start/stop</li>
+              <li><kbd>r</kbd> restart</li>
+              <li><kbd>c</kbd> console</li>
+              <li><kbd>l</kbd> logs</li>
+              <li><kbd>o</kbd> open port</li>
+            </ul>
+          </article>
+
+          <article class="feature">
+            <div class="feature-icon icon-layers" data-icon="images">
+              <i></i><i></i><i></i><i></i>
+            </div>
+            <h3>Images</h3>
+            <p>
+              Layer-by-layer composition, architecture, exposed config. Spawn new
+              containers with an interactive modal for ports, volumes and env.
+            </p>
+            <ul class="feature-keys">
+              <li><kbd>R</kbd> run new</li>
+              <li><kbd>i</kbd> inspect</li>
+              <li><kbd>f</kbd> filter</li>
+              <li><kbd>D</kbd> delete</li>
+            </ul>
+          </article>
+
+          <article class="feature">
+            <div class="feature-icon icon-vol" data-icon="volumes">
+              <i class="ring"></i>
+            </div>
+            <h3>Volumes</h3>
+            <p>
+              See exactly which containers are attached, driver options, usage —
+              and delete safely with confirmation.
+            </p>
+            <ul class="feature-keys">
+              <li><kbd>i</kbd> inspect</li>
+              <li><kbd>D</kbd> delete</li>
+              <li><kbd>f</kbd> filter</li>
+            </ul>
+          </article>
+
+          <article class="feature">
+            <div class="feature-icon icon-net" data-icon="networks">
+              <i class="node"></i>
+              <i class="node"></i>
+              <i class="node"></i>
+              <i class="line l1"></i>
+              <i class="line l2"></i>
+            </div>
+            <h3>Networks</h3>
+            <p>
+              Topology at a glance. IPv4 / IPv6 subnets, active vs. unused filters,
+              connection state — for when port-mapping math gets hairy.
+            </p>
+            <ul class="feature-keys">
+              <li><kbd>i</kbd> inspect</li>
+              <li><kbd>f</kbd> filter</li>
+            </ul>
+          </article>
+
+          <article class="feature feature-wide">
+            <h3><span class="accent-green">Fully responsive</span> — works in every pane you throw it in.</h3>
+            <p>
+              Adapts to any terminal size, with a min of 60 columns × 13 rows. Resize
+              your VS Code split, drop into a tmux pane, or SSH into a remote Docker
+              host — the layout reflows without a restart.
+            </p>
+            <div class="terminal-set">
+              <div class="mini-term" data-w="120">
+                <div class="mini-chrome"><span></span><span></span><span></span><em>wide</em></div>
+                <div class="mini-body"><span class="green">●</span> nginx-proxy &nbsp; RUNNING &nbsp; 2.3% &nbsp; 128MB</div>
+              </div>
+              <div class="mini-term" data-w="80">
+                <div class="mini-chrome"><span></span><span></span><span></span><em>medium</em></div>
+                <div class="mini-body"><span class="green">●</span> api-server &nbsp; RUN &nbsp; 15.1%</div>
+              </div>
+              <div class="mini-term" data-w="60">
+                <div class="mini-chrome"><span></span><span></span><span></span><em>min</em></div>
+                <div class="mini-body"><span class="green">●</span> postgres &nbsp; RUN</div>
+              </div>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <!-- LIVE DEMO -->
+      <section id="demo" class="section section-demo">
+        <div class="section-head">
+          <span class="kicker"># live demo</span>
+          <h2>A look inside the TUI.</h2>
+          <p>Switch tabs. The interface is keyboard-only — and proud of it.</p>
+        </div>
+
+        <div class="demo">
+          <div class="demo-term">
+            <div class="term-chrome">
+              <span class="dot red"></span>
+              <span class="dot yellow"></span>
+              <span class="dot green"></span>
+              <span class="term-title">tinyd · docker.sock</span>
+              <span class="term-help">F1 help · q quit</span>
+            </div>
+            <div class="demo-dots" aria-hidden="true">···</div>
+            <div class="demo-tabs" role="tablist">
+              <button class="demo-tab is-active" data-tab="containers" role="tab" aria-selected="true">Containers</button>
+              <button class="demo-tab" data-tab="images" role="tab" aria-selected="false">Images</button>
+              <button class="demo-tab" data-tab="models" role="tab" aria-selected="false">Models</button>
+              <button class="demo-tab" data-tab="volumes" role="tab" aria-selected="false">Volumes</button>
+              <button class="demo-tab" data-tab="networks" role="tab" aria-selected="false">Networks</button>
+              <div class="demo-tabs-rest" aria-hidden="true"></div>
+            </div>
+            <div class="demo-body" id="demo-body"></div>
+            <div class="demo-statusbar">
+              <span class="sb-item" id="sb-pager">Showing 1-0 of 0</span>
+              <span class="sb-item sb-spacer"></span>
+              <span class="sb-item"><kbd>i</kbd> inspect</span>
+              <span class="sb-item"><kbd>D</kbd> delete</span>
+              <span class="sb-item"><kbd>f</kbd> filter</span>
+              <span class="sb-item"><kbd>1</kbd>–<kbd>5</kbd> tabs</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- INSTALL -->
+      <section id="install" class="section">
+        <div class="section-head">
+          <span class="kicker"># install</span>
+          <h2>Three lines and you're in.</h2>
+          <p>Requires Go 1.19+ and a running Docker daemon (local or remote).</p>
+        </div>
+
+        <div class="install-grid">
+          <div class="install-card">
+            <div class="install-card-head"><span class="green">●</span> clone &amp; build</div>
+            <pre><code><span class="c">$</span> git clone https://github.com/jalonsogo/tinyd.git
+<span class="c">$</span> cd tinyd
+<span class="c">$</span> go build -o tinyd
+<span class="c">$</span> ./tinyd</code></pre>
+            <button class="copy" data-copy="git clone https://github.com/jalonsogo/tinyd.git&#10;cd tinyd&#10;go build -o tinyd&#10;./tinyd">copy</button>
+          </div>
+
+          <div class="install-card">
+            <div class="install-card-head"><span class="yellow">●</span> remote docker</div>
+            <pre><code><span class="c">$</span> export DOCKER_HOST=tcp://host:2376
+<span class="c">$</span> ./tinyd</code></pre>
+            <button class="copy" data-copy="export DOCKER_HOST=tcp://host:2376&#10;./tinyd">copy</button>
+          </div>
+
+          <div class="install-card">
+            <div class="install-card-head"><span class="cyan">●</span> docker desktop</div>
+            <pre><code><span class="c">#</span> autodetected on macOS / Windows
+<span class="c">$</span> ./tinyd</code></pre>
+            <button class="copy" data-copy="./tinyd">copy</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- KEYS -->
+      <section id="keys" class="section section-keys">
+        <div class="section-head">
+          <span class="kicker"># keyboard</span>
+          <h2>The whole interface, on a postcard.</h2>
+          <p>All letter keys are case-insensitive. <kbd>F1</kbd> opens help any time.</p>
+        </div>
+
+        <div class="keys-grid">
+          <div class="keys-col">
+            <h4>navigation</h4>
+            <dl>
+              <dt><kbd>↑</kbd> <kbd>k</kbd></dt><dd>move up</dd>
+              <dt><kbd>↓</kbd> <kbd>j</kbd></dt><dd>move down</dd>
+              <dt><kbd>←</kbd> <kbd>h</kbd></dt><dd>prev tab</dd>
+              <dt><kbd>→</kbd> <kbd>l</kbd></dt><dd>next tab</dd>
+              <dt><kbd>1</kbd>–<kbd>4</kbd></dt><dd>jump to tab</dd>
+            </dl>
+          </div>
+          <div class="keys-col">
+            <h4>universal</h4>
+            <dl>
+              <dt><kbd>i</kbd></dt><dd>inspect</dd>
+              <dt><kbd>D</kbd></dt><dd>delete</dd>
+              <dt><kbd>f</kbd></dt><dd>filter</dd>
+              <dt><kbd>F1</kbd></dt><dd>help</dd>
+              <dt><kbd>esc</kbd></dt><dd>back</dd>
+              <dt><kbd>q</kbd></dt><dd>quit</dd>
+            </dl>
+          </div>
+          <div class="keys-col">
+            <h4>containers</h4>
+            <dl>
+              <dt><kbd>s</kbd></dt><dd>start / stop</dd>
+              <dt><kbd>r</kbd></dt><dd>restart</dd>
+              <dt><kbd>c</kbd></dt><dd>console (altscreen)</dd>
+              <dt><kbd>o</kbd></dt><dd>open port</dd>
+              <dt><kbd>l</kbd></dt><dd>logs</dd>
+            </dl>
+          </div>
+          <div class="keys-col">
+            <h4>images</h4>
+            <dl>
+              <dt><kbd>R</kbd></dt><dd>run new container</dd>
+              <dt><kbd>i</kbd></dt><dd>inspect layers</dd>
+              <dt><kbd>D</kbd></dt><dd>remove image</dd>
+              <dt><kbd>f</kbd></dt><dd>filter status</dd>
+            </dl>
+          </div>
+        </div>
+      </section>
+
+      <!-- WHO -->
+      <section class="section section-who">
+        <div class="who-card">
+          <div class="who-text">
+            <span class="kicker"># who</span>
+            <h2>Made by a designer. Mostly written by Claude.</h2>
+            <p>
+              tinyd is an experiment in what happens when a designer hands the keys
+              to an AI pair-programmer and asks for the smallest possible Docker
+              Desktop. The result: a little terminal app that boots in milliseconds
+              and stays out of your way.
+            </p>
+            <div class="who-cta">
+              <a href="https://github.com/jalonsogo/tinyd" target="_blank" rel="noopener">
+                ★ Star on GitHub
+              </a>
+              <a href="https://github.com/jalonsogo/tinyd/issues/new" target="_blank" rel="noopener">
+                report an issue
+              </a>
+            </div>
+          </div>
+          <div class="who-mascot">
+            <img src="logo/cld.png" alt="Claude ♥ tinyd — pixel-art trio" />
+            <div class="who-mascot-caption">claude · ♥ · tinyd</div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-row">
+        <img class="footer-logo" src="logo/tinyd.svg" alt="tinyd logo" width="20" height="20" />
+        <span class="brand-mark small">tinyd</span>
+        <span class="footer-dim">Tiny Docker Desktop TUI</span>
+      </div>
+      <div class="footer-row">
+        <a href="https://github.com/jalonsogo/tinyd" target="_blank" rel="noopener">github</a>
+        <a href="https://github.com/jalonsogo/tinyd/issues" target="_blank" rel="noopener">issues</a>
+        <a href="https://charm.sh/" target="_blank" rel="noopener">built with charm</a>
+      </div>
+      <div class="footer-row footer-dim">
+        <span>© 2026 · LOLcense</span>
+        <span><span id="clock">--:--:--</span> · <span id="uptime">uptime 0s</span></span>
+      </div>
+    </footer>
+
+    <div class="toast" id="toast" role="status" aria-live="polite">copied to clipboard</div>
+
+    <script src="script.js"></script>
+  </body>
+</html>

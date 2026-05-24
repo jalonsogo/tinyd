@@ -22,11 +22,25 @@ python3 -m http.server 8765
 
 ## Deploy
 
-GitHub Pages publishes from `main` automatically. Push and the site updates:
+The source lives here (`jalonsogo/tinyd-landing`); the deployed site is mirrored
+to the `gh-pages` branch of [`jalonsogo/tinyd`](https://github.com/jalonsogo/tinyd)
+so the URL stays at `jalonsogo.github.io/tinyd`.
+
+Both pushes are wrapped in `deploy.sh`:
 
 ```sh
-git push
+./deploy.sh
 ```
+
+That runs:
+
+```sh
+git push origin main              # source repo
+git push tinyd main:gh-pages      # mirror used by GitHub Pages
+```
+
+Requires the `tinyd` remote to be configured locally
+(`git remote add tinyd https://github.com/jalonsogo/tinyd.git`).
 
 ## License
 

@@ -127,13 +127,13 @@ const (
 	ViewModePullModel
 )
 
-// Tab indices — declared so the rest of the codebase can stop hard-coding 0..3.
+// Tab indices — declared so the rest of the codebase can stop hard-coding 0..4.
 const (
 	TabContainers = iota
 	TabImages
+	TabModels
 	TabVolumes
 	TabNetworks
-	TabModels
 )
 
 // Container filter constants

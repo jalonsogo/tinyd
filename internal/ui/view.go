@@ -1417,7 +1417,7 @@ func (m *Model) getActionShortcuts() string {
 	var shortcuts []string
 
 	switch m.activeTab {
-	case 0: // Containers - dynamic based on selected container status
+	case types.TabContainers: // dynamic based on selected container status
 		if m.selectedRow < len(m.containers) {
 			container := m.containers[m.selectedRow]
 
@@ -1451,24 +1451,24 @@ func (m *Model) getActionShortcuts() string {
 				renderShortcut("D", "elete"),
 			}
 		}
-	case 1: // Images
+	case types.TabImages:
 		shortcuts = []string{
 			renderShortcut("S", "tart"),
 			renderShortcut("P", "ull image"),
 			renderShortcut("I", "nspect"),
 			renderShortcut("D", "elete"),
 		}
-	case 2: // Volumes
+	case types.TabVolumes:
 		shortcuts = []string{
 			renderShortcut("I", "nspect"),
 			renderShortcut("D", "elete"),
 		}
-	case 3: // Networks
+	case types.TabNetworks:
 		shortcuts = []string{
 			renderShortcut("I", "nspect"),
 			renderShortcut("D", "elete"),
 		}
-	case types.TabModels: // Models (Docker Model Runner)
+	case types.TabModels: // Docker Model Runner
 		shortcuts = []string{
 			renderShortcut("R", "un"),
 			renderShortcut("P", "ull model"),

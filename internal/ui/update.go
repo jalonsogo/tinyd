@@ -23,7 +23,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.actionInProgress = false
 		m.err = nil // any list arriving means the daemon is back up
 		// Keep selection in bounds
-		if m.activeTab == 0 && m.selectedRow >= len(m.containers) && len(m.containers) > 0 {
+		if m.activeTab == types.TabContainers && m.selectedRow >= len(m.containers) && len(m.containers) > 0 {
 			m.selectedRow = len(m.containers) - 1
 		}
 		return m, nil
@@ -32,7 +32,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.images = msg
 		m.err = nil
 		// Keep selection in bounds
-		if m.activeTab == 1 && m.selectedRow >= len(m.images) && len(m.images) > 0 {
+		if m.activeTab == types.TabImages && m.selectedRow >= len(m.images) && len(m.images) > 0 {
 			m.selectedRow = len(m.images) - 1
 		}
 		return m, nil
@@ -41,7 +41,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.volumes = msg
 		m.err = nil
 		// Keep selection in bounds
-		if m.activeTab == 2 && m.selectedRow >= len(m.volumes) && len(m.volumes) > 0 {
+		if m.activeTab == types.TabVolumes && m.selectedRow >= len(m.volumes) && len(m.volumes) > 0 {
 			m.selectedRow = len(m.volumes) - 1
 		}
 		return m, nil
@@ -50,7 +50,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.networks = msg
 		m.err = nil
 		// Keep selection in bounds
-		if m.activeTab == 3 && m.selectedRow >= len(m.networks) && len(m.networks) > 0 {
+		if m.activeTab == types.TabNetworks && m.selectedRow >= len(m.networks) && len(m.networks) > 0 {
 			m.selectedRow = len(m.networks) - 1
 		}
 		return m, nil
@@ -291,28 +291,28 @@ func (m *Model) handleListViewKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 				// Handle delete based on active tab
 				switch m.activeTab {
-				case 0: // Containers
+				case types.TabContainers:
 					if m.selectedRow < len(m.containers) {
 						container := m.containers[m.selectedRow]
 						m.actionLabel = "Deleting " + container.Name
 						m.actionTargetID = container.ID
 						return m, m.deleteContainerCmd(container.ID, container.Name)
 					}
-				case 1: // Images
+				case types.TabImages:
 					if m.selectedRow < len(m.images) {
 						image := m.images[m.selectedRow]
 						m.actionLabel = "Deleting " + image.Repository + ":" + image.Tag
 						m.actionTargetID = image.ID
 						return m, m.deleteImageCmd(image.ID)
 					}
-				case 2: // Volumes
+				case types.TabVolumes:
 					if m.selectedRow < len(m.volumes) {
 						volume := m.volumes[m.selectedRow]
 						m.actionLabel = "Deleting " + volume.Name
 						m.actionTargetID = volume.Name
 						return m, m.deleteVolumeCmd(volume.Name)
 					}
-				case 3: // Networks
+				case types.TabNetworks:
 					if m.selectedRow < len(m.networks) {
 						network := m.networks[m.selectedRow]
 						m.actionLabel = "Deleting " + network.Name
@@ -396,7 +396,7 @@ func (m *Model) handleListViewKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case "l", "L":
-		if m.activeTab == 0 {
+		if m.activeTab == types.TabContainers {
 			return m.handleContainerLogs()
 		}
 		return m, nil
@@ -461,27 +461,28 @@ func (m *Model) handleListViewKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m *Model) handleTabSwitch(key string) (tea.Model, tea.Cmd) {
 	oldTab := m.activeTab
 
+	const lastTab = types.TabNetworks
 	switch key {
 	case "left", "h":
 		m.activeTab--
 		if m.activeTab < 0 {
-			m.activeTab = types.TabModels
+			m.activeTab = lastTab
 		}
 	case "right", "l":
 		m.activeTab++
-		if m.activeTab > types.TabModels {
-			m.activeTab = 0
+		if m.activeTab > lastTab {
+			m.activeTab = types.TabContainers
 		}
 	case "1":
 		m.activeTab = types.TabContainers
 	case "2":
 		m.activeTab = types.TabImages
 	case "3":
-		m.activeTab = types.TabVolumes
-	case "4":
-		m.activeTab = types.TabNetworks
-	case "5":
 		m.activeTab = types.TabModels
+	case "4":
+		m.activeTab = types.TabVolumes
+	case "5":
+		m.activeTab = types.TabNetworks
 	}
 
 	if m.activeTab != oldTab {

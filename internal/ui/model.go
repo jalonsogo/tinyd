@@ -130,9 +130,9 @@ func NewModel() (*Model, error) {
 	tabs := []components.TabItem{
 		{Name: "Containers", Shortcut: "^D"},
 		{Name: "Images", Shortcut: "^I"},
+		{Name: "Models", Shortcut: "^M"},
 		{Name: "Volumes", Shortcut: "^V"},
 		{Name: "Networks", Shortcut: "^N"},
-		{Name: "Models", Shortcut: "^M"},
 	}
 
 	return &Model{

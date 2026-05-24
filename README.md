@@ -105,21 +105,7 @@ Complete image inventory with layer inspection:
 ● postgres        15           412MB    1w ago
 ```
 
-### 3️⃣ Volumes
-Volume management with container tracking:
-```
-● app-data        local    nginx-proxy, api-server    2d ago
-● postgres-vol    local    postgres-db                1w ago
-```
-
-### 4️⃣ Networks
-Network topology at a glance:
-```
-● bridge          bridge   172.17.0.0/16    local
-● app-network     bridge   172.18.0.0/16    local
-```
-
-### 5️⃣ Models (Docker Model Runner)
+### 3️⃣ Models (Docker Model Runner)
 Manage local AI models pulled from the `ai/` namespace on Docker Hub:
 ```
 ○ ai/qwen2.5-coder:7b-instruct-q4_K_M    7B    Q4_K_M    4.2GB
@@ -127,6 +113,20 @@ Manage local AI models pulled from the `ai/` namespace on Docker Hub:
 ○ ai/smollm2:1.7b                         1.7B  F16       3.4GB
 ```
 Requires [Docker Model Runner](https://docs.docker.com/ai/model-runner/) enabled in Docker Desktop. tinyd probes `http://localhost:12434` on startup (override with `DMR_BASE_URL`). If it's not reachable the tab still loads with a friendly empty state pointing at the docs.
+
+### 4️⃣ Volumes
+Volume management with container tracking:
+```
+● app-data        local    nginx-proxy, api-server    2d ago
+● postgres-vol    local    postgres-db                1w ago
+```
+
+### 5️⃣ Networks
+Network topology at a glance:
+```
+● bridge          bridge   172.17.0.0/16    local
+● app-network     bridge   172.18.0.0/16    local
+```
 
 ## ⌨️ Keyboard Reference
 

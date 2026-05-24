@@ -133,10 +133,11 @@ func (m *Model) renderContainersTab() string {
 		totalWidth = 60 // Minimum width for reasonable display
 	}
 
-	// Fixed columns: Status(2) + CPU(8) + MEM(8) + Ports(15)
-	// Spacing: 5 gaps * 2 spaces = 10
-	fixedWidth := 2 + 8 + 8 + 15
-	spacing := 5 * 2 // (6 columns - 1) * 2 spaces per gap
+	// Fixed columns: dot(2) + STATUS(11) + CPU(8) + MEM(8) + Ports(15)
+	// Spacing: 6 gaps * 2 spaces = 12
+	statusW := 11
+	fixedWidth := 2 + statusW + 8 + 8 + 15
+	spacing := 6 * 2 // (7 columns - 1) * 2 spaces per gap
 	fillWidth := totalWidth - fixedWidth - spacing
 
 	// Ensure minimum width for fill columns
@@ -158,6 +159,7 @@ func (m *Model) renderContainersTab() string {
 
 	headers := []components.TableHeader{
 		{Label: "", Width: 2, AlignRight: false},          // Status dot
+		{Label: "STATUS", Width: statusW, AlignRight: false},
 		{Label: "NAME", Width: nameFill, AlignRight: false},
 		{Label: "IMAGE", Width: imageFill, AlignRight: false},
 		{Label: "CPU", Width: 8, AlignRight: true},
@@ -194,13 +196,15 @@ func (m *Model) renderContainersTab() string {
 		if m.actionInProgress && m.actionTargetID == c.ID {
 			statusCell = m.spinnerDot(i == m.selectedRow)
 		}
+		text, color := m.statusText(c.ID, c.Status)
 		cells := []string{
 			statusCell,
-			truncateWithEllipsis(c.Name, headers[1].Width),   // Fill column - truncate
-			truncateWithEllipsis(c.Image, headers[2].Width),  // Fill column - truncate
-			c.CPU,                                             // Fixed column - short values
-			c.Mem,                                             // Fixed column - short values
-			truncateWithEllipsis(c.Ports, 15),                // Can be long
+			m.renderStatusCell(text, color, headers[1].Width, i == m.selectedRow),
+			truncateWithEllipsis(c.Name, headers[2].Width),
+			truncateWithEllipsis(c.Image, headers[3].Width),
+			c.CPU,
+			c.Mem,
+			truncateWithEllipsis(c.Ports, 15),
 		}
 
 		rows = append(rows, components.TableRow{
@@ -235,18 +239,19 @@ func (m *Model) renderImagesTab() string {
 		totalWidth = 50
 	}
 
-	// Fixed columns: Status(2) + Size(10) + Created(8)
-	// Spacing: 3 gaps * 2 spaces = 6
-	fixedWidth := 2 + 10 + 8
-	spacing := 3 * 2 // (4 columns - 1) * 2 spaces per gap
+	// Fixed columns: dot(2) + STATUS(10) + Size(10) + Created(8)
+	// Spacing: 4 gaps * 2 spaces = 8
+	statusW := 10
+	fixedWidth := 2 + statusW + 10 + 8
+	spacing := 4 * 2 // (5 columns - 1) * 2 spaces per gap
 	fillWidth := totalWidth - fixedWidth - spacing
 	if fillWidth < 20 {
 		fillWidth = 20
 	}
 
-	// One fill column: Repository:Tag
 	headers := []components.TableHeader{
-		{Label: "", Width: 2, AlignRight: false},              // Status
+		{Label: "", Width: 2, AlignRight: false},              // Status dot
+		{Label: "STATUS", Width: statusW, AlignRight: false},
 		{Label: "REPOSITORY:TAG", Width: fillWidth, AlignRight: false},
 		{Label: "SIZE", Width: 10, AlignRight: true},
 		{Label: "CREATED", Width: 8, AlignRight: false},
@@ -282,19 +287,31 @@ func (m *Model) renderImagesTab() string {
 
 		// Only truncate if actually needed
 		repoTagCell := repoTag
-		if len(repoTag) > headers[1].Width {
-			repoTagCell = truncateWithEllipsis(repoTag, headers[1].Width)
+		if len(repoTag) > headers[2].Width {
+			repoTagCell = truncateWithEllipsis(repoTag, headers[2].Width)
 		}
 
 		statusCell := m.getImageStatusDot(img, i == m.selectedRow)
 		if m.actionInProgress && m.actionTargetID == img.ID {
 			statusCell = m.spinnerDot(i == m.selectedRow)
 		}
+		// Map the image flags onto our centralized status palette.
+		var stateKey string
+		switch {
+		case img.InUse:
+			stateKey = "IMG_IN_USE"
+		case img.Dangling:
+			stateKey = "IMG_DANGLING"
+		default:
+			stateKey = "IMG_UNUSED"
+		}
+		text, color := m.statusText(img.ID, stateKey)
 		cells := []string{
 			statusCell,
+			m.renderStatusCell(text, color, headers[1].Width, i == m.selectedRow),
 			repoTagCell,
-			img.Size,                    // Fixed column - short values
-			shortenTimeAgo(img.Created), // Fixed column - already short
+			img.Size,
+			shortenTimeAgo(img.Created),
 		}
 
 		rows = append(rows, components.TableRow{
@@ -651,9 +668,10 @@ func (m *Model) renderModelsTab() string {
 		totalWidth = 60
 	}
 
-	// Fixed: status(2) + params(8) + quant(8) + size(8) — gaps: 4*2=8
-	fixedWidth := 2 + 8 + 8 + 8
-	spacing := 4 * 2
+	// Fixed: dot(2) + STATUS(10) + params(8) + quant(8) + size(8) — gaps: 5*2=10
+	statusW := 10
+	fixedWidth := 2 + statusW + 8 + 8 + 8
+	spacing := 5 * 2
 	fillWidth := totalWidth - fixedWidth - spacing
 	if fillWidth < 25 {
 		fillWidth = 25
@@ -661,6 +679,7 @@ func (m *Model) renderModelsTab() string {
 
 	headers := []components.TableHeader{
 		{Label: "", Width: 2, AlignRight: false},
+		{Label: "STATUS", Width: statusW, AlignRight: false},
 		{Label: "REPOSITORY:TAG", Width: fillWidth, AlignRight: false},
 		{Label: "PARAMS", Width: 8, AlignRight: true},
 		{Label: "QUANT", Width: 8, AlignRight: false},
@@ -696,9 +715,11 @@ func (m *Model) renderModelsTab() string {
 			dot = m.spinnerDot(i == m.selectedRow)
 		}
 
+		text, color := m.statusText(ref, "MDL_AVAILABLE")
 		cells := []string{
 			dot,
-			truncateWithEllipsis(ref, headers[1].Width),
+			m.renderStatusCell(text, color, headers[1].Width, i == m.selectedRow),
+			truncateWithEllipsis(ref, headers[2].Width),
 			defaultStr(mod.ParamSize, "--"),
 			defaultStr(mod.Quant, "--"),
 			defaultStr(mod.Size, "--"),
@@ -1376,6 +1397,77 @@ func dotStyle(fg lipgloss.Color, selected bool) lipgloss.Style {
 		s = s.Background(components.ColorSelectedBg).Bold(true)
 	}
 	return s
+}
+
+// statusLabel returns the (text, color) pair shown in the STATUS column for
+// a given resource. When the resource is currently the target of an action
+// (Stopping/Starting/Restarting/Deleting/Pulling), the in-progress verb
+// wins over the underlying state so feedback is immediate.
+//
+// The fallback chain is: action override → real state → "—".
+func (m *Model) statusText(targetID, realStatus string) (string, lipgloss.Color) {
+	if m.actionInProgress && m.actionTargetID == targetID && m.actionLabel != "" {
+		// actionLabel is "Verb <name>"; take the verb.
+		verb := strings.SplitN(m.actionLabel, " ", 2)[0]
+		return verb + "…", components.ColorHighlight
+	}
+	return statusTextStatic(realStatus)
+}
+
+// statusTextStatic maps tinyd's internal status strings to (label, color).
+// Centralizing the mapping means every tab renders the same label for the
+// same state — no drift between containers/images/models.
+func statusTextStatic(s string) (string, lipgloss.Color) {
+	dark := components.DarkBackground
+
+	green, yellow, red, gray := lipgloss.Color("#00DD00"), lipgloss.Color("#DDDD00"),
+		lipgloss.Color("#FF4444"), lipgloss.Color("#888888")
+	if !dark {
+		green, yellow, red, gray = lipgloss.Color("#007700"), lipgloss.Color("#886600"),
+			lipgloss.Color("#CC0000"), lipgloss.Color("#666666")
+	}
+
+	switch s {
+	// Containers
+	case "RUNNING":
+		return "Running", green
+	case "STOPPED":
+		return "Stopped", gray
+	case "PAUSED":
+		return "Paused", yellow
+	case "RESTARTING":
+		return "Restarting", yellow
+	case "ERROR":
+		return "Error", red
+
+	// Images
+	case "IMG_IN_USE":
+		return "In use", green
+	case "IMG_UNUSED":
+		return "Unused", gray
+	case "IMG_DANGLING":
+		return "Dangling", red
+
+	// Models
+	case "MDL_AVAILABLE":
+		return "Available", gray
+	case "MDL_LOADED":
+		return "Loaded", green
+
+	default:
+		return "—", gray
+	}
+}
+
+// renderStatusCell renders the STATUS column value with the right color,
+// applying the selection background when the row is selected so the
+// highlight remains continuous.
+func (m *Model) renderStatusCell(text string, fg lipgloss.Color, width int, selected bool) string {
+	s := lipgloss.NewStyle().Foreground(fg)
+	if selected {
+		s = s.Background(components.ColorSelectedBg).Bold(true)
+	}
+	return s.Render(padRightStr(text, width))
 }
 
 // getStatusDot returns a colored status indicator based on container status.

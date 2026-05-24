@@ -329,6 +329,15 @@ func (t TableComponent) View() string {
 							if t.headers[j].Width > 1 {
 								b.WriteString(spacerStyle.Render(strings.Repeat(" ", t.headers[j].Width-1)))
 							}
+						} else if isPrestyled(cell) {
+							// Cell already carries ANSI styling — preserve it
+							// instead of re-wrapping with the selection style
+							// (which would override the per-state color).
+							b.WriteString(cell)
+							visible := len(stripAnsiCodes(cell))
+							if visible < t.headers[j].Width {
+								b.WriteString(spacerStyle.Render(strings.Repeat(" ", t.headers[j].Width-visible)))
+							}
 						} else {
 							var cellText string
 							if t.headers[j].AlignRight {
@@ -493,6 +502,14 @@ func (d DetailViewComponent) View() string {
 	}
 
 	return b.String()
+}
+
+// isPrestyled reports whether a cell already contains ANSI escape sequences.
+// The TableComponent treats such cells as literal: their styling is preserved
+// (not overridden by the selection style) and width is computed via the
+// stripped string so multi-byte UTF-8 runes don't get sliced.
+func isPrestyled(s string) bool {
+	return strings.Contains(s, "\x1b[")
 }
 
 // isStatusGlyph reports whether a cell carries one of the single-cell glyphs

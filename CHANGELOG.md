@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- **Models tab (Docker Model Runner)** — Fifth tab managing AI models via DMR's HTTP API on `localhost:12434`. List local models, inspect (raw JSON), delete with confirmation, pull from Docker Hub's `ai/` namespace using the existing pull-search flow, and `R` to open the chat REPL (`docker model run`). DMR availability is probed on startup; when absent the tab renders a friendly pointer to the docs instead of an error. Configurable via `DMR_BASE_URL`. See `docs/AI_MODELS_PLAN.md` for design notes.
 - **Pull from Docker Hub** — Press `P` on the Images tab to search Docker Hub (`docker search` via the API). Type a query, browse results with `↑/↓`, press `Enter` to pull, `Esc` to cancel. The pulling stage shows an animated braille spinner and the image name.
 - **In-row action spinner** — While an action runs, the affected row's status dot is replaced with a cyan animated spinner so feedback is visible directly in the list, not just in the action bar.
 - **Working help overlay** — `?` (or `Shift+H`) toggles a keybinding panel rendered over the tab content; `Esc` closes it. Previously the keybinding existed but rendered nothing.

@@ -5,6 +5,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"tinyd/internal/dmr"
 	"tinyd/internal/docker"
 	"tinyd/internal/types"
 )
@@ -304,6 +305,99 @@ func (m *Model) inspectNetworkCmd(networkID string) tea.Cmd {
 		}
 		return types.InspectMsg(inspect)
 	}
+}
+
+// --- Docker Model Runner commands ---
+
+// probeDMRCmd checks whether DMR is reachable. Runs once at startup; the
+// Models tab uses the result to decide between rendering models and a
+// "DMR not enabled" empty state.
+func (m *Model) probeDMRCmd() tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := m.dmr.WithCustomTimeout(2 * time.Second)
+		defer cancel()
+		return types.DMRAvailableMsg(m.dmr.Available(ctx))
+	}
+}
+
+// fetchModelsCmd lists local DMR models. Returns ErrMsg silently when DMR
+// is unavailable so a missing runner doesn't spam the action bar.
+func (m *Model) fetchModelsCmd() tea.Cmd {
+	return func() tea.Msg {
+		if !m.dmrAvailable {
+			return types.ModelListMsg{}
+		}
+		ctx, cancel := m.dmr.WithTimeout()
+		defer cancel()
+
+		models, err := m.dmr.FetchModels(ctx)
+		if err != nil {
+			return types.ErrMsg(err)
+		}
+		return types.ModelListMsg(models)
+	}
+}
+
+// inspectModelCmd retrieves model inspect data
+func (m *Model) inspectModelCmd(ref string) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := m.dmr.WithTimeout()
+		defer cancel()
+		out, err := m.dmr.InspectModel(ctx, ref)
+		if err != nil {
+			return types.ActionErrorMsg(err.Error())
+		}
+		return types.InspectMsg(out)
+	}
+}
+
+// deleteModelCmd removes a local model
+func (m *Model) deleteModelCmd(ref string) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := m.dmr.WithCustomTimeout(dmr.TimeoutMedium)
+		defer cancel()
+		if err := m.dmr.DeleteModel(ctx, ref); err != nil {
+			return types.ActionErrorMsg(err.Error())
+		}
+		return types.ActionSuccessMsg("Model " + ref + " deleted")
+	}
+}
+
+// searchModelsCmd searches Docker Hub's ai/ namespace
+func (m *Model) searchModelsCmd(query string) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := m.dmr.WithCustomTimeout(dmr.TimeoutMedium)
+		defer cancel()
+		results, err := m.dmr.SearchModels(ctx, query, 25)
+		if err != nil {
+			return types.ActionErrorMsg(err.Error())
+		}
+		return types.ModelSearchMsg(results)
+	}
+}
+
+// pullModelCmd pulls a DMR model
+func (m *Model) pullModelCmd(ref string) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := m.dmr.WithCustomTimeout(dmr.TimeoutLong)
+		defer cancel()
+		if err := m.dmr.PullModel(ctx, ref); err != nil {
+			return types.ActionErrorMsg("Failed to pull " + ref + ": " + err.Error())
+		}
+		return types.ActionSuccessMsg("Pulled " + ref)
+	}
+}
+
+// runModelCmd opens an interactive chat REPL via `docker model run <ref>`.
+// Suspends the TUI for the duration of the chat (same pattern as exec).
+func (m *Model) runModelCmd(ref string) tea.Cmd {
+	c := exec.Command("docker", "model", "run", ref)
+	return tea.ExecProcess(c, func(err error) tea.Msg {
+		if err != nil {
+			return types.ActionErrorMsg("Failed to run model: " + err.Error())
+		}
+		return nil
+	})
 }
 
 // execContainerCmd opens an interactive shell in the container

@@ -119,6 +119,15 @@ Network topology at a glance:
 ● app-network     bridge   172.18.0.0/16    local
 ```
 
+### 5️⃣ Models (Docker Model Runner)
+Manage local AI models pulled from the `ai/` namespace on Docker Hub:
+```
+○ ai/qwen2.5-coder:7b-instruct-q4_K_M    7B    Q4_K_M    4.2GB
+○ ai/llama3.2:3b                          3B    Q5_K_M    2.1GB
+○ ai/smollm2:1.7b                         1.7B  F16       3.4GB
+```
+Requires [Docker Model Runner](https://docs.docker.com/ai/model-runner/) enabled in Docker Desktop. tinyd probes `http://localhost:12434` on startup (override with `DMR_BASE_URL`). If it's not reachable the tab still loads with a friendly empty state pointing at the docs.
+
 ## ⌨️ Keyboard Reference
 
 > **Note:** All letter keys work in both uppercase and lowercase (case-insensitive).
@@ -129,7 +138,7 @@ Network topology at a glance:
 | `↑` / `k` | Move selection up (with auto-scroll) |
 | `↓` / `j` | Move selection down (with auto-scroll) |
 | `←` / `→` | Previous / next tab |
-| `1-4` | Jump directly to tab |
+| `1-5` | Jump directly to tab |
 
 > Navigation keys remain active even while a Docker action (stop, restart, delete, pull...) is in flight — only the action keys themselves are temporarily blocked to prevent queuing.
 
@@ -152,6 +161,8 @@ Network topology at a glance:
 | `l` | Containers | View logs |
 | `s` | Images | Run a new container from the selected image |
 | `p` | Images | Pull image from Docker Hub (search + select) |
+| `r` | Models | Run model / open chat REPL (`docker model run`) |
+| `p` | Models | Pull model from Docker Hub `ai/` namespace |
 
 ## 🎯 Use Cases
 

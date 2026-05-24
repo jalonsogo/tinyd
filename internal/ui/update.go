@@ -51,6 +51,38 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case types.ModelListMsg:
+		m.models = msg
+		if m.activeTab == types.TabModels && m.selectedRow >= len(m.models) && len(m.models) > 0 {
+			m.selectedRow = len(m.models) - 1
+		}
+		return m, nil
+
+	case types.DMRAvailableMsg:
+		m.dmrAvailable = bool(msg)
+		if m.dmrAvailable {
+			return m, m.fetchModelsCmd()
+		}
+		return m, nil
+
+	case types.ModelSearchMsg:
+		// Reuse the existing pull-search UI state for models. Convert
+		// model results into the same ImageSearchItem shape so the
+		// renderer doesn't need a second code path.
+		items := make([]types.ImageSearchItem, 0, len(msg))
+		for _, r := range msg {
+			items = append(items, types.ImageSearchItem{
+				Name:        r.Name,
+				Description: r.Description,
+				Stars:       r.Stars,
+			})
+		}
+		m.pullSearchResults = items
+		m.pullSearchSelected = 0
+		m.pullSearchScrollOffset = 0
+		m.pullStage = 2
+		return m, nil
+
 	case types.ErrMsg:
 		m.err = error(msg)
 		m.loading = false
@@ -63,28 +95,39 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.actionLabel = ""
 		m.actionTargetID = ""
 		// If we were in the pull flow, return to the list view
-		if m.currentView == types.ViewModePullImage {
+		if m.currentView == types.ViewModePullImage || m.currentView == types.ViewModePullModel {
+			wasModel := m.currentView == types.ViewModePullModel
 			m.currentView = types.ViewModeList
 			m.pullStage = 0
 			m.pullSearchQuery = ""
 			m.pullSearchResults = nil
 			m.pullingImageName = ""
+			if wasModel {
+				return m, m.fetchModelsCmd()
+			}
 			return m, tea.Batch(m.fetchContainersCmd(), m.fetchImagesCmd())
 		}
-		return m, m.fetchContainersCmd()
+		// Refresh the active tab — different surfaces have different ground truth
+		switch m.activeTab {
+		case types.TabModels:
+			return m, m.fetchModelsCmd()
+		default:
+			return m, m.fetchContainersCmd()
+		}
 
 	case types.ActionErrorMsg:
 		m.statusMessage = "ERROR: " + string(msg)
 		m.actionInProgress = false
 		m.actionLabel = ""
 		m.actionTargetID = ""
+		inPullFlow := m.currentView == types.ViewModePullImage || m.currentView == types.ViewModePullModel
 		// If a search failed, drop back to the input stage so the user can retry
-		if m.currentView == types.ViewModePullImage && m.pullStage == 1 {
+		if inPullFlow && m.pullStage == 1 {
 			m.pullStage = 0
 			m.pullSearchError = string(msg)
 		}
 		// If a pull failed, also return to list view
-		if m.currentView == types.ViewModePullImage && m.pullStage == 3 {
+		if inPullFlow && m.pullStage == 3 {
 			m.currentView = types.ViewModeList
 			m.pullStage = 0
 			m.pullingImageName = ""
@@ -110,13 +153,17 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case types.TickMsg:
 		// Refresh data periodically (only if no action in progress)
 		if !m.actionInProgress {
-			return m, tea.Batch(
+			cmds := []tea.Cmd{
 				m.fetchContainersCmd(),
 				m.fetchImagesCmd(),
 				m.fetchVolumesCmd(),
 				m.fetchNetworksCmd(),
 				tickCmd(),
-			)
+			}
+			if m.dmrAvailable {
+				cmds = append(cmds, m.fetchModelsCmd())
+			}
+			return m, tea.Batch(cmds...)
 		}
 		return m, tickCmd()
 
@@ -205,7 +252,7 @@ func (m *Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleLogsViewKeys(msg)
 	case types.ViewModeInspect:
 		return m.handleInspectViewKeys(msg)
-	case types.ViewModePullImage:
+	case types.ViewModePullImage, types.ViewModePullModel:
 		return m.handlePullViewKeys(msg)
 	default:
 		return m, nil
@@ -262,6 +309,14 @@ func (m *Model) handleListViewKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 						m.actionTargetID = network.ID
 						return m, m.deleteNetworkCmd(network.ID)
 					}
+				case types.TabModels:
+					if m.selectedRow < len(m.models) {
+						mod := m.models[m.selectedRow]
+						ref := mod.Repository + ":" + mod.Tag
+						m.actionLabel = "Deleting " + ref
+						m.actionTargetID = ref
+						return m, m.deleteModelCmd(ref)
+					}
 				}
 			}
 			// User cancelled or selected No
@@ -295,7 +350,7 @@ func (m *Model) handleListViewKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case "left", "right", "1", "2", "3", "4":
+	case "left", "right", "1", "2", "3", "4", "5":
 		return m.handleTabSwitch(key)
 
 	case "enter":
@@ -324,15 +379,10 @@ func (m *Model) handleListViewKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch key {
 	// Container actions (only on Containers tab)
 	case "s", "S":
-		if m.activeTab == 0 {
+		if m.activeTab == types.TabContainers {
 			return m.handleContainerStartStop()
-		} else if m.activeTab == 1 {
+		} else if m.activeTab == types.TabImages {
 			return m.handleImageStart()
-		}
-		return m, nil
-	case "r", "R":
-		if m.activeTab == 0 {
-			return m.handleContainerRestart()
 		}
 		return m, nil
 	case "l", "L":
@@ -342,37 +392,53 @@ func (m *Model) handleListViewKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "i", "I":
 		switch m.activeTab {
-		case 0: // Containers
+		case types.TabContainers:
 			return m.handleContainerInspect()
-		case 1: // Images
+		case types.TabImages:
 			return m.handleImageInspect()
-		case 2: // Volumes
+		case types.TabVolumes:
 			return m.handleVolumeInspect()
-		case 3: // Networks
+		case types.TabNetworks:
 			return m.handleNetworkInspect()
+		case types.TabModels:
+			return m.handleModelInspect()
 		}
 		return m, nil
 	case "d", "D":
 		switch m.activeTab {
-		case 0: // Containers
+		case types.TabContainers:
 			return m.handleContainerDelete()
-		case 1: // Images
+		case types.TabImages:
 			return m.handleImageDelete()
-		case 2: // Volumes
+		case types.TabVolumes:
 			return m.handleVolumeDelete()
-		case 3: // Networks
+		case types.TabNetworks:
 			return m.handleNetworkDelete()
+		case types.TabModels:
+			return m.handleModelDelete()
 		}
 		return m, nil
 	case "e", "E":
-		if m.activeTab == 0 {
+		if m.activeTab == types.TabContainers {
 			return m.handleContainerExec()
 		}
 		return m, nil
 
 	case "p", "P":
-		if m.activeTab == 1 {
+		if m.activeTab == types.TabImages {
 			return m.handleImagePullSearch()
+		}
+		if m.activeTab == types.TabModels {
+			return m.handleModelPullSearch()
+		}
+		return m, nil
+
+	case "r", "R":
+		if m.activeTab == types.TabContainers {
+			return m.handleContainerRestart()
+		}
+		if m.activeTab == types.TabModels {
+			return m.handleModelRun()
 		}
 		return m, nil
 
@@ -389,21 +455,23 @@ func (m *Model) handleTabSwitch(key string) (tea.Model, tea.Cmd) {
 	case "left", "h":
 		m.activeTab--
 		if m.activeTab < 0 {
-			m.activeTab = 3
+			m.activeTab = types.TabModels
 		}
 	case "right", "l":
 		m.activeTab++
-		if m.activeTab > 3 {
+		if m.activeTab > types.TabModels {
 			m.activeTab = 0
 		}
 	case "1":
-		m.activeTab = 0
+		m.activeTab = types.TabContainers
 	case "2":
-		m.activeTab = 1
+		m.activeTab = types.TabImages
 	case "3":
-		m.activeTab = 2
+		m.activeTab = types.TabVolumes
 	case "4":
-		m.activeTab = 3
+		m.activeTab = types.TabNetworks
+	case "5":
+		m.activeTab = types.TabModels
 	}
 
 	if m.activeTab != oldTab {
@@ -468,14 +536,16 @@ func (m *Model) handleInspectViewKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // getMaxRow returns the number of items in the current tab
 func (m *Model) getMaxRow() int {
 	switch m.activeTab {
-	case 0:
+	case types.TabContainers:
 		return len(m.containers)
-	case 1:
+	case types.TabImages:
 		return len(m.images)
-	case 2:
+	case types.TabVolumes:
 		return len(m.volumes)
-	case 3:
+	case types.TabNetworks:
 		return len(m.networks)
+	case types.TabModels:
+		return len(m.models)
 	}
 	return 0
 }
@@ -608,6 +678,47 @@ func (m *Model) handleImageDelete() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// --- Model handlers (Docker Model Runner) ---
+
+func (m *Model) handleModelInspect() (tea.Model, tea.Cmd) {
+	if m.selectedRow >= len(m.models) {
+		return m, nil
+	}
+	mod := m.models[m.selectedRow]
+	m.currentView = types.ViewModeInspect
+	m.inspectContent = ""
+	return m, m.inspectModelCmd(mod.Repository + ":" + mod.Tag)
+}
+
+func (m *Model) handleModelDelete() (tea.Model, tea.Cmd) {
+	if m.selectedRow >= len(m.models) {
+		return m, nil
+	}
+	m.deleteConfirmMode = !m.deleteConfirmMode
+	m.deleteConfirmOption = 1
+	return m, nil
+}
+
+func (m *Model) handleModelRun() (tea.Model, tea.Cmd) {
+	if m.selectedRow >= len(m.models) {
+		return m, nil
+	}
+	mod := m.models[m.selectedRow]
+	return m, m.runModelCmd(mod.Repository + ":" + mod.Tag)
+}
+
+func (m *Model) handleModelPullSearch() (tea.Model, tea.Cmd) {
+	m.currentView = types.ViewModePullModel
+	m.pullStage = 0
+	m.pullSearchQuery = ""
+	m.pullSearchResults = nil
+	m.pullSearchSelected = 0
+	m.pullSearchScrollOffset = 0
+	m.pullSearchError = ""
+	m.statusMessage = ""
+	return m, nil
+}
+
 // handleImagePullSearch enters the pull-from-Hub flow
 func (m *Model) handleImagePullSearch() (tea.Model, tea.Cmd) {
 	m.currentView = types.ViewModePullImage
@@ -646,6 +757,9 @@ func (m *Model) handlePullViewKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			m.pullStage = 1
 			m.pullSearchError = ""
+			if m.currentView == types.ViewModePullModel {
+				return m, m.searchModelsCmd(q)
+			}
 			return m, m.searchImagesCmd(q)
 		case "backspace":
 			if len(m.pullSearchQuery) > 0 {
@@ -694,6 +808,9 @@ func (m *Model) handlePullViewKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.pullingImageName = img.Name
 			m.actionInProgress = true
 			m.statusMessage = "Pulling " + img.Name + "..."
+			if m.currentView == types.ViewModePullModel {
+				return m, m.pullModelCmd(img.Name)
+			}
 			return m, m.pullSearchCompleteCmd(img.Name)
 		}
 		return m, nil

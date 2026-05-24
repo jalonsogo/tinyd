@@ -6,6 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"tinyd/internal/components"
+	"tinyd/internal/dmr"
 	"tinyd/internal/docker"
 	"tinyd/internal/types"
 )
@@ -14,12 +15,15 @@ import (
 type Model struct {
 	// Docker client
 	docker *docker.Client
+	dmr    *dmr.Client
 
 	// Data
-	containers []types.Container
-	images     []types.Image
-	volumes    []types.Volume
-	networks   []types.Network
+	containers   []types.Container
+	images       []types.Image
+	volumes      []types.Volume
+	networks     []types.Network
+	models       []types.Model
+	dmrAvailable bool // set once on startup; if false we skip refresh + show empty state
 
 	// Navigation state
 	activeTab      int
@@ -128,10 +132,12 @@ func NewModel() (*Model, error) {
 		{Name: "Images", Shortcut: "^I"},
 		{Name: "Volumes", Shortcut: "^V"},
 		{Name: "Networks", Shortcut: "^N"},
+		{Name: "Models", Shortcut: "^M"},
 	}
 
 	return &Model{
 		docker:         dockerClient,
+		dmr:            dmr.NewClient(),
 		activeTab:      0,
 		selectedRow:    0,
 		scrollOffset:   0,
@@ -152,6 +158,7 @@ func NewModel() (*Model, error) {
 		images:     []types.Image{},
 		volumes:    []types.Volume{},
 		networks:   []types.Network{},
+		models:     []types.Model{},
 		runPorts:   []types.PortMapping{},
 		runVolumes: []types.VolumeMapping{},
 		runEnvVars: []types.EnvVar{},
@@ -165,6 +172,7 @@ func (m *Model) Init() tea.Cmd {
 		m.fetchImagesCmd(),
 		m.fetchVolumesCmd(),
 		m.fetchNetworksCmd(),
+		m.probeDMRCmd(),
 		tickCmd(),
 		animationTickCmd(),
 	)

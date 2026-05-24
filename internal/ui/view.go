@@ -52,7 +52,7 @@ func (m *Model) View() string {
 		return m.renderLogsView()
 	case types.ViewModeInspect:
 		return m.renderInspectView()
-	case types.ViewModePullImage:
+	case types.ViewModePullImage, types.ViewModePullModel:
 		return m.renderPullView()
 	default:
 		return "Unknown view mode\n\nPress q to quit"
@@ -74,14 +74,16 @@ func (m *Model) renderListView() string {
 		contentStr = m.renderHelpOverlay()
 	} else {
 		switch m.activeTab {
-		case 0:
+		case types.TabContainers:
 			contentStr = m.renderContainersTab()
-		case 1:
+		case types.TabImages:
 			contentStr = m.renderImagesTab()
-		case 2:
+		case types.TabVolumes:
 			contentStr = m.renderVolumesTab()
-		case 3:
+		case types.TabNetworks:
 			contentStr = m.renderNetworksTab()
+		case types.TabModels:
+			contentStr = m.renderModelsTab()
 		}
 	}
 	b.WriteString(contentStr)
@@ -504,6 +506,111 @@ func (m *Model) renderNetworksTab() string {
 	return table.View() + scrollInfo
 }
 
+// renderModelsTab renders the Models tab (Docker Model Runner).
+func (m *Model) renderModelsTab() string {
+	if !m.dmrAvailable {
+		dim := lipgloss.NewStyle().Foreground(components.ColorDim)
+		bright := lipgloss.NewStyle().Foreground(components.ColorBright).Bold(true)
+		var b strings.Builder
+		b.WriteString("\n")
+		b.WriteString(bright.Render(" Docker Model Runner is not reachable"))
+		b.WriteString("\n\n")
+		b.WriteString(dim.Render("  tinyd looked at " + m.dmr.BaseURL() + " and got no response."))
+		b.WriteString("\n")
+		b.WriteString(dim.Render("  Enable it in Docker Desktop → Settings → Beta features → Docker Model Runner,"))
+		b.WriteString("\n")
+		b.WriteString(dim.Render("  or set DMR_BASE_URL to a reachable endpoint."))
+		b.WriteString("\n\n")
+		b.WriteString(dim.Render("  https://docs.docker.com/ai/model-runner/"))
+		b.WriteString("\n")
+		return b.String()
+	}
+
+	if len(m.models) == 0 {
+		if m.loading {
+			return "Loading models..."
+		}
+		return "No local models. Press P to pull one from Docker Hub (ai/ namespace)."
+	}
+
+	totalWidth := m.width - 4
+	if totalWidth < 60 {
+		totalWidth = 60
+	}
+
+	// Fixed: status(2) + params(8) + quant(8) + size(8) — gaps: 4*2=8
+	fixedWidth := 2 + 8 + 8 + 8
+	spacing := 4 * 2
+	fillWidth := totalWidth - fixedWidth - spacing
+	if fillWidth < 25 {
+		fillWidth = 25
+	}
+
+	headers := []components.TableHeader{
+		{Label: "", Width: 2, AlignRight: false},
+		{Label: "REPOSITORY:TAG", Width: fillWidth, AlignRight: false},
+		{Label: "PARAMS", Width: 8, AlignRight: true},
+		{Label: "QUANT", Width: 8, AlignRight: false},
+		{Label: "SIZE", Width: 8, AlignRight: true},
+	}
+
+	var rows []components.TableRow
+	start := m.scrollOffset
+	end := m.scrollOffset + m.viewportHeight
+	if end > len(m.models) {
+		end = len(m.models)
+	}
+	if start > len(m.models) {
+		start = len(m.models)
+	}
+
+	for i := start; i < end; i++ {
+		mod := m.models[i]
+		ref := mod.Repository + ":" + mod.Tag
+
+		if m.deleteConfirmMode && i == m.selectedRow {
+			confirmText := renderDeleteConfirmation(ref, m.deleteConfirmOption)
+			emptyCells := make([]string, len(headers)-1)
+			rows = append(rows, components.TableRow{
+				Cells:      append([]string{confirmText}, emptyCells...),
+				IsSelected: true,
+			})
+			continue
+		}
+
+		dot := m.getInUseDot(false, i == m.selectedRow) // DMR doesn't tell us loaded/unloaded yet; gray dot
+		if m.actionInProgress && m.actionTargetID == ref {
+			dot = m.spinnerDot(i == m.selectedRow)
+		}
+
+		cells := []string{
+			dot,
+			truncateWithEllipsis(ref, headers[1].Width),
+			defaultStr(mod.ParamSize, "--"),
+			defaultStr(mod.Quant, "--"),
+			defaultStr(mod.Size, "--"),
+		}
+		rows = append(rows, components.TableRow{
+			Cells:      cells,
+			IsSelected: i == m.selectedRow,
+		})
+	}
+
+	table := components.NewTableComponent(headers).
+		WithWidth(m.width).
+		SetRows(rows).
+		SetVisibleRange(0, len(rows))
+
+	return table.View() + m.getScrollIndicator(len(m.models))
+}
+
+func defaultStr(s, fallback string) string {
+	if strings.TrimSpace(s) == "" {
+		return fallback
+	}
+	return s
+}
+
 // renderLogsView renders the logs detail view
 func (m *Model) renderLogsView() string {
 	var b strings.Builder
@@ -679,7 +786,7 @@ func (m *Model) renderHelpOverlay() string {
 
 	section("Navigation")
 	row("←/→", "Switch tabs")
-	row("1–4", "Jump to tab")
+	row("1–5", "Jump to tab")
 	row("↑/↓ or j/k", "Move selection")
 	row("Enter", "Refresh list")
 
@@ -698,6 +805,12 @@ func (m *Model) renderHelpOverlay() string {
 	row("D", "Delete")
 
 	section("Volumes / Networks")
+	row("I", "Inspect")
+	row("D", "Delete")
+
+	section("Models (Docker Model Runner)")
+	row("R", "Run / chat REPL")
+	row("P", "Pull model (search ai/ namespace)")
 	row("I", "Inspect")
 	row("D", "Delete")
 
@@ -1239,6 +1352,13 @@ func (m *Model) getActionShortcuts() string {
 		}
 	case 3: // Networks
 		shortcuts = []string{
+			renderShortcut("I", "nspect"),
+			renderShortcut("D", "elete"),
+		}
+	case types.TabModels: // Models (Docker Model Runner)
+		shortcuts = []string{
+			renderShortcut("R", "un"),
+			renderShortcut("P", "ull model"),
 			renderShortcut("I", "nspect"),
 			renderShortcut("D", "elete"),
 		}

@@ -75,6 +75,26 @@ type ImageSearchItem struct {
 	Official    bool
 }
 
+// Model represents a local Docker Model Runner model.
+type Model struct {
+	ID         string
+	Repository string // e.g. "ai/qwen2.5-coder"
+	Tag        string // e.g. "7b-instruct-q4_K_M"
+	Format     string // gguf / safetensors / ...
+	Quant      string // Q4_K_M, F16, ...
+	ParamSize  string // "7B", "1.5B"
+	Size       string // human-readable disk footprint
+	Created    string
+}
+
+// ModelSearchItem is a hub search result for the ai/ namespace.
+type ModelSearchItem struct {
+	Name        string
+	Description string
+	Stars       int
+	Pulls       int
+}
+
 // Message types for Bubble Tea
 type ContainerListMsg []Container
 type ImageListMsg []Image
@@ -88,6 +108,9 @@ type ActionErrorMsg string
 type LogsMsg string
 type InspectMsg string
 type ImageSearchMsg []ImageSearchItem
+type ModelListMsg []Model
+type ModelSearchMsg []ModelSearchItem
+type DMRAvailableMsg bool
 
 // ViewMode represents different UI views
 type ViewMode int
@@ -101,6 +124,16 @@ const (
 	ViewModeFilter
 	ViewModeRunImage
 	ViewModePullImage
+	ViewModePullModel
+)
+
+// Tab indices — declared so the rest of the codebase can stop hard-coding 0..3.
+const (
+	TabContainers = iota
+	TabImages
+	TabVolumes
+	TabNetworks
+	TabModels
 )
 
 // Container filter constants

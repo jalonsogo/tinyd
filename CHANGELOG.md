@@ -4,6 +4,13 @@ All notable changes to tinyd will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.2.0](https://github.com/jalonsogo/tinyd/compare/v0.1.0...v0.2.0) (2026-05-24)
+
+
+### Miscellaneous Chores
+
+* cut v0.2.0 ([6d3d3be](https://github.com/jalonsogo/tinyd/commit/6d3d3be0e667dfa65283757d9558e445ef0aba84))
+
 ## [Unreleased]
 
 ### Added

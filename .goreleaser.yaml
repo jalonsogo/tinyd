@@ -63,21 +63,9 @@ changelog:
       - "Merge branch"
 
 release:
-  draft: true              # let you review notes before publishing
+  # release-please owns the GitHub Release (notes + tag); GoReleaser
+  # only attaches the cross-platform binaries to it. `append` is also
+  # safe for the manual-tag fallback path: if no release exists yet,
+  # GoReleaser creates one and uploads assets.
+  mode: append
   prerelease: auto         # tags like v0.1.0-rc1 → prerelease
-  name_template: "tinyd {{.Tag}}"
-  header: |
-    ## tinyd {{.Tag}}
-
-    Download the binary for your platform below, extract, and run.
-
-    ```sh
-    # macOS / Linux
-    tar -xzf tinyd_*_macOS_arm64.tar.gz
-    ./tinyd
-
-    # Windows
-    # unzip the .zip and run tinyd.exe
-    ```
-  footer: |
-    **Full Changelog**: https://github.com/jalonsogo/tinyd/compare/{{ .PreviousTag }}...{{ .Tag }}

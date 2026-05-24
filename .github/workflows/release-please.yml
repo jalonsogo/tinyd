@@ -1,0 +1,53 @@
+name: release-please
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write       # for tags, releases, and committing version bumps
+  pull-requests: write  # for opening the release PR
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name:        ${{ steps.release.outputs.tag_name }}
+    steps:
+      # Reads conventional commits since the last release, opens (or updates)
+      # a "chore(release): X.Y.Z" PR with a bumped version + CHANGELOG entry.
+      # Merging that PR cuts the tag and GitHub Release.
+      - uses: googleapis/release-please-action@v4
+        id: release
+        with:
+          config-file: .github/release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  # When release-please cuts a release, build the cross-platform binaries
+  # and attach them to it. GoReleaser is invoked inline here (not via the
+  # standalone release.yml) because tags pushed with GITHUB_TOKEN don't
+  # cascade into other workflows.
+  goreleaser:
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release-please.outputs.tag_name }}
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

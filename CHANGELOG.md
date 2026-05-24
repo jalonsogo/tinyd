@@ -7,19 +7,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- **Pull from Docker Hub** — Press `P` on the Images tab to search Docker Hub (`docker search` via the API). Type a query, browse results with `↑/↓`, press `Enter` to pull, `Esc` to cancel. The pulling stage shows an animated braille spinner and the image name.
+- **In-row action spinner** — While an action runs, the affected row's status dot is replaced with a cyan animated spinner so feedback is visible directly in the list, not just in the action bar.
+- **Working help overlay** — `?` (or `Shift+H`) toggles a keybinding panel rendered over the tab content; `Esc` closes it. Previously the keybinding existed but rendered nothing.
 - **Full-screen logs view** - Logs now use the entire terminal height instead of fixed 15 lines
 - **Fuzzy search in logs** - Press `S` in logs view to search with case-insensitive substring filtering
-- **Pull image functionality** - Press `P` on images tab to pull new Docker images with interactive modal
 - **Case-insensitive keyboard shortcuts** - All letter key triggers work with both uppercase and lowercase
 - **Transparent terminal support** - Removed all background colors for better terminal transparency
 
 ### Changed
+- **Help shortcut moved from `H` to `?`** in the action bar — lowercase `h` was always intercepted by the vim-style left binding before reaching the help handler. The on-screen label and accepted key are now consistent.
+- **Action bar always reflects current tab + selection** — when an action posted a status message, the shortcut list used to stay stuck on the previously-rendered tab's shortcuts. It now recomputes every render.
+- **Navigation works during actions** — `↑/↓/j/k`, `←/→`, `1–4` and `Ctrl+C` are now allowed while a Docker call is in flight. Only the action keys (`s/r/l/e/i/d/p/Enter`) are blocked, to prevent queuing a second operation.
+- **`h` no longer switches tabs** — it kept colliding with the delete-confirm Yes selector and the help intent; arrows and `1–4` are the canonical tab nav.
+- **Stop/restart command timeout bumped to 30 s** — was 10 s, which raced with Docker's own 10 s SIGTERM grace period (see Fixed).
+- **Pull image action bar label** — `P`ull → `P`ull image, to make the destructive nature clearer.
 - Logs view now displays search button `[Search]` with S underscored in header
 - When search is activated, input field appears: `[Search: query█]`
 - Scroll position resets automatically when search query changes
 - Run container modal (`R` key) now context-aware on images tab
 
 ### Fixed
+- **Spurious "stop operation timed out after 15s" errors** — the Go context (10 s default) raced with Docker's hardcoded 10 s SIGTERM grace period, so a normal `docker stop` could surface `DeadlineExceeded` even though the container actually stopped in the background. The context is now 30 s, and the error message no longer hard-codes a misleading duration.
+- **Selected-row status dot was invisible** — the table component re-rendered the dot with the selection style, stripping the status color. The dot now composites its status color over the selection background and stays readable.
+- **Inactive tabs showed extra `┴` joins** under the bottom border, producing visible ticks. Replaced with `─` so the rule reads as a continuous line.
 - Delete modal now properly displays in overlay mode
 - Fixed panic when containers have no names (added safety checks)
 - Status display correctly shows container states

@@ -67,6 +67,14 @@ type EnvVar struct {
 	Value string
 }
 
+// ImageSearchItem is a single Docker Hub search result
+type ImageSearchItem struct {
+	Name        string
+	Description string
+	Stars       int
+	Official    bool
+}
+
 // Message types for Bubble Tea
 type ContainerListMsg []Container
 type ImageListMsg []Image
@@ -79,6 +87,7 @@ type ActionSuccessMsg string
 type ActionErrorMsg string
 type LogsMsg string
 type InspectMsg string
+type ImageSearchMsg []ImageSearchItem
 
 // ViewMode represents different UI views
 type ViewMode int

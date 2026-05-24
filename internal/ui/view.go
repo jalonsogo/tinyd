@@ -52,6 +52,8 @@ func (m *Model) View() string {
 		return m.renderLogsView()
 	case types.ViewModeInspect:
 		return m.renderInspectView()
+	case types.ViewModePullImage:
+		return m.renderPullView()
 	default:
 		return "Unknown view mode\n\nPress q to quit"
 	}
@@ -66,17 +68,21 @@ func (m *Model) renderListView() string {
 	tabsContent := m.tabs.View()
 	b.WriteString(tabsContent)
 
-	// Render content based on active tab
+	// Render content based on active tab — or help overlay if active
 	var contentStr string
-	switch m.activeTab {
-	case 0:
-		contentStr = m.renderContainersTab()
-	case 1:
-		contentStr = m.renderImagesTab()
-	case 2:
-		contentStr = m.renderVolumesTab()
-	case 3:
-		contentStr = m.renderNetworksTab()
+	if m.showHelp {
+		contentStr = m.renderHelpOverlay()
+	} else {
+		switch m.activeTab {
+		case 0:
+			contentStr = m.renderContainersTab()
+		case 1:
+			contentStr = m.renderImagesTab()
+		case 2:
+			contentStr = m.renderVolumesTab()
+		case 3:
+			contentStr = m.renderNetworksTab()
+		}
 	}
 	b.WriteString(contentStr)
 
@@ -98,14 +104,13 @@ func (m *Model) renderListView() string {
 		b.WriteString("\n")
 	}
 
-	// Render action bar at bottom
+	// Render action bar at bottom — always recompute actions for the current
+	// tab/selection, and overlay either an in-progress spinner or a
+	// last-result status message.
 	b.WriteString("\n")
 	m.actionBar = m.actionBar.WithWidth(m.width)
-	if m.statusMessage != "" {
-		m.actionBar = m.actionBar.SetStatusMessage(m.statusMessage)
-	} else {
-		m.actionBar = m.actionBar.SetActions(m.getActionShortcuts())
-	}
+	m.actionBar = m.actionBar.SetActions(m.getActionShortcuts())
+	m.actionBar = m.actionBar.SetStatusMessage(m.currentStatusMessage())
 	b.WriteString(m.actionBar.View())
 
 	return b.String()
@@ -183,8 +188,12 @@ func (m *Model) renderContainersTab() string {
 			continue
 		}
 
+		statusCell := m.getStatusDot(c.Status, i == m.selectedRow)
+		if m.actionInProgress && m.actionTargetID == c.ID {
+			statusCell = m.spinnerDot(i == m.selectedRow)
+		}
 		cells := []string{
-			m.getStatusDot(c.Status),
+			statusCell,
 			truncateWithEllipsis(c.Name, headers[1].Width),   // Fill column - truncate
 			truncateWithEllipsis(c.Image, headers[2].Width),  // Fill column - truncate
 			c.CPU,                                             // Fixed column - short values
@@ -275,8 +284,12 @@ func (m *Model) renderImagesTab() string {
 			repoTagCell = truncateWithEllipsis(repoTag, headers[1].Width)
 		}
 
+		statusCell := m.getImageStatusDot(img, i == m.selectedRow)
+		if m.actionInProgress && m.actionTargetID == img.ID {
+			statusCell = m.spinnerDot(i == m.selectedRow)
+		}
 		cells := []string{
-			m.getImageStatusDot(img),
+			statusCell,
 			repoTagCell,
 			img.Size,                    // Fixed column - short values
 			shortenTimeAgo(img.Created), // Fixed column - already short
@@ -360,9 +373,9 @@ func (m *Model) renderVolumesTab() string {
 			continue
 		}
 
-		statusDot := grayStyle.Render("○")
-		if vol.InUse {
-			statusDot = greenStyle.Render("●")
+		statusDot := m.getInUseDot(vol.InUse, i == m.selectedRow)
+		if m.actionInProgress && m.actionTargetID == vol.Name {
+			statusDot = m.spinnerDot(i == m.selectedRow)
 		}
 
 		// Show container names or "-" if not in use
@@ -457,9 +470,9 @@ func (m *Model) renderNetworksTab() string {
 			continue
 		}
 
-		statusDot := grayStyle.Render("○")
-		if net.InUse {
-			statusDot = greenStyle.Render("●")
+		statusDot := m.getInUseDot(net.InUse, i == m.selectedRow)
+		if m.actionInProgress && m.actionTargetID == net.ID {
+			statusDot = m.spinnerDot(i == m.selectedRow)
 		}
 
 		// TODO: Add Containers field to Network type to show connected container names
@@ -614,6 +627,255 @@ func (m *Model) renderInspectView() string {
 	}
 
 	return b.String()
+}
+
+// spinnerDot returns an animated spinner styled like the status dots, so the
+// row being acted on shows clear in-progress feedback in the status column.
+func (m *Model) spinnerDot(selected bool) string {
+	frames := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+	ch := frames[m.animationFrame%len(frames)]
+	return dotStyle(components.ColorHighlight, selected).Render(ch)
+}
+
+// currentStatusMessage returns the live message to show in the action bar:
+// an animated spinner + actionLabel while an action is running, otherwise
+// the last success/error message.
+func (m *Model) currentStatusMessage() string {
+	if m.actionInProgress && m.actionLabel != "" {
+		frames := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+		spinner := frames[m.animationFrame%len(frames)]
+		return spinner + " " + m.actionLabel + "..."
+	}
+	return m.statusMessage
+}
+
+// renderHelpOverlay renders a list of keybindings inside the tab content area
+func (m *Model) renderHelpOverlay() string {
+	var b strings.Builder
+
+	titleStyle := lipgloss.NewStyle().Foreground(components.ColorBright).Bold(true)
+	sectionStyle := lipgloss.NewStyle().Foreground(components.ColorHighlight).Bold(true)
+	keyStyle := lipgloss.NewStyle().Foreground(components.ColorBright).Bold(true)
+	descStyle := lipgloss.NewStyle().Foreground(components.ColorNormal)
+	dimStyle := lipgloss.NewStyle().Foreground(components.ColorDim)
+
+	row := func(key, desc string) {
+		b.WriteString("  ")
+		b.WriteString(keyStyle.Render(padRightStr(key, 14)))
+		b.WriteString("  ")
+		b.WriteString(descStyle.Render(desc))
+		b.WriteString("\n")
+	}
+	section := func(name string) {
+		b.WriteString("\n")
+		b.WriteString(sectionStyle.Render(" " + name))
+		b.WriteString("\n")
+	}
+
+	b.WriteString(titleStyle.Render(" tinyd — Keybindings"))
+	b.WriteString("\n")
+	b.WriteString(dimStyle.Render(" Press ? or ESC to close"))
+	b.WriteString("\n")
+
+	section("Navigation")
+	row("←/→", "Switch tabs")
+	row("1–4", "Jump to tab")
+	row("↑/↓ or j/k", "Move selection")
+	row("Enter", "Refresh list")
+
+	section("Containers")
+	row("S", "Start / Stop")
+	row("R", "Restart")
+	row("L", "View logs")
+	row("E", "Exec shell")
+	row("I", "Inspect")
+	row("D", "Delete")
+
+	section("Images")
+	row("S", "Run image")
+	row("P", "Pull image (search Docker Hub)")
+	row("I", "Inspect")
+	row("D", "Delete")
+
+	section("Volumes / Networks")
+	row("I", "Inspect")
+	row("D", "Delete")
+
+	section("Global")
+	row("?", "Toggle this help")
+	row("ESC", "Cancel / close overlay")
+	row("Ctrl+C ×2", "Quit")
+
+	return b.String()
+}
+
+// renderPullView renders the pull-from-Hub search and results view
+func (m *Model) renderPullView() string {
+	var b strings.Builder
+
+	titleStyle := lipgloss.NewStyle().Foreground(components.ColorBright).Bold(true)
+	helpStyle := lipgloss.NewStyle().Foreground(components.ColorNormal)
+	lineStyle := lipgloss.NewStyle().Foreground(components.ColorBorder)
+	dimStyle := lipgloss.NewStyle().Foreground(components.ColorDim)
+	normalStyle := lipgloss.NewStyle().Foreground(components.ColorNormal)
+	brightStyle := lipgloss.NewStyle().Foreground(components.ColorBright)
+	selectedStyle := lipgloss.NewStyle().
+		Background(components.ColorSelectedBg).
+		Foreground(components.ColorSelectedFg).
+		Bold(true)
+	errorStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#FF4444"))
+
+	// Header
+	headerText := "Pull image from Docker Hub"
+	var headerRight string
+	switch m.pullStage {
+	case 0:
+		headerRight = "[ENTER] Search  [ESC] Cancel"
+	case 1:
+		headerRight = "[ESC] Cancel"
+	case 2:
+		headerRight = "[↑↓] Move  [ENTER] Pull  [ESC] Cancel"
+	case 3:
+		headerRight = "Pulling..."
+	}
+	headerSpacing := strings.Repeat(" ", max(1, m.width-len(headerText)-len(headerRight)-4))
+	b.WriteString(titleStyle.Render(headerText))
+	b.WriteString(headerSpacing)
+	b.WriteString(helpStyle.Render(headerRight))
+	b.WriteString("\n")
+	b.WriteString(lineStyle.Render(strings.Repeat("─", m.width-2)))
+	b.WriteString("\n")
+
+	// Input line — always visible so the user sees the active query
+	cursor := ""
+	if m.pullStage == 0 {
+		cursor = brightStyle.Render("▌")
+	}
+	queryDisplay := m.pullSearchQuery
+	if queryDisplay == "" && m.pullStage == 0 {
+		queryDisplay = dimStyle.Render("type to search Docker Hub...")
+	} else {
+		queryDisplay = normalStyle.Render(queryDisplay)
+	}
+	b.WriteString(dimStyle.Render(" Search: "))
+	b.WriteString(queryDisplay)
+	b.WriteString(cursor)
+	b.WriteString("\n\n")
+
+	switch m.pullStage {
+	case 0:
+		if m.pullSearchError != "" {
+			b.WriteString(errorStyle.Render(" " + m.pullSearchError))
+			b.WriteString("\n")
+		} else {
+			b.WriteString(dimStyle.Render(" Press ENTER to search."))
+			b.WriteString("\n")
+		}
+
+	case 1:
+		b.WriteString(dimStyle.Render(" Searching..."))
+		b.WriteString("\n")
+
+	case 2:
+		if len(m.pullSearchResults) == 0 {
+			b.WriteString(dimStyle.Render(" No results found."))
+			b.WriteString("\n")
+			break
+		}
+
+		// Column widths: stars(5) official(4) name(fill) description(rest)
+		totalWidth := m.width - 4
+		starsW, officialW := 7, 5
+		nameW := 30
+		if totalWidth-starsW-officialW-nameW-6 < 20 {
+			nameW = 20
+		}
+		descW := totalWidth - starsW - officialW - nameW - 6
+		if descW < 10 {
+			descW = 10
+		}
+
+		// Header row
+		header := padRightStr("★", starsW) + "  " +
+			padRightStr("OFF", officialW) + "  " +
+			padRightStr("NAME", nameW) + "  " +
+			padRightStr("DESCRIPTION", descW)
+		b.WriteString(dimStyle.Render(header))
+		b.WriteString("\n")
+		b.WriteString(lineStyle.Render(strings.Repeat("─", m.width-2)))
+		b.WriteString("\n")
+
+		visible := m.pullResultsViewportHeight()
+		start := m.pullSearchScrollOffset
+		end := start + visible
+		if end > len(m.pullSearchResults) {
+			end = len(m.pullSearchResults)
+		}
+
+		for i := start; i < end; i++ {
+			r := m.pullSearchResults[i]
+			official := ""
+			if r.Official {
+				official = "yes"
+			}
+			row := padRightStr(fmt.Sprintf("%d", r.Stars), starsW) + "  " +
+				padRightStr(official, officialW) + "  " +
+				padRightStr(truncateWithEllipsis(r.Name, nameW), nameW) + "  " +
+				padRightStr(truncateWithEllipsis(r.Description, descW), descW)
+
+			if i == m.pullSearchSelected {
+				b.WriteString(selectedStyle.Render(row))
+			} else {
+				b.WriteString(normalStyle.Render(row))
+			}
+			b.WriteString("\n")
+		}
+
+		// Scroll hint
+		if len(m.pullSearchResults) > visible {
+			b.WriteString("\n")
+			b.WriteString(dimStyle.Render(fmt.Sprintf(" Showing %d-%d of %d",
+				start+1, end, len(m.pullSearchResults))))
+			b.WriteString("\n")
+		}
+
+	case 3:
+		frames := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+		spinner := frames[m.animationFrame%len(frames)]
+		highlightStyle := lipgloss.NewStyle().Foreground(components.ColorHighlight).Bold(true)
+		b.WriteString("\n")
+		b.WriteString(" ")
+		b.WriteString(highlightStyle.Render(spinner))
+		b.WriteString("  ")
+		b.WriteString(brightStyle.Render("Pulling "))
+		b.WriteString(brightStyle.Bold(true).Render(m.pullingImageName))
+		b.WriteString(brightStyle.Render("..."))
+		b.WriteString("\n\n")
+		b.WriteString(dimStyle.Render(" This may take a minute. The view will return when complete."))
+		b.WriteString("\n")
+	}
+
+	return b.String()
+}
+
+// padLeft and padRight are defined in components/components.go; redefine
+// helpers locally only when missing. (They are exported via the components
+// package below — keep using those.)
+
+// max returns the larger of two ints
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+// padRightStr right-pads a string with spaces up to width, truncating if longer.
+func padRightStr(s string, width int) string {
+	if len(s) >= width {
+		return s[:width]
+	}
+	return s + strings.Repeat(" ", width-len(s))
 }
 
 // Helper functions
@@ -801,32 +1063,84 @@ func colorizeJSON(jsonStr string) string {
 	return result.String()
 }
 
-// getStatusDot returns a colored status indicator based on container status
-func (m *Model) getStatusDot(status string) string {
+// dotStyle returns a lipgloss style with the given fg color, applying the
+// selection bg when the row is selected so the dot remains visible.
+func dotStyle(fg lipgloss.Color, selected bool) lipgloss.Style {
+	s := lipgloss.NewStyle().Foreground(fg)
+	if selected {
+		s = s.Background(components.ColorSelectedBg).Bold(true)
+	}
+	return s
+}
+
+// getStatusDot returns a colored status indicator based on container status.
+// When `selected` is true, the selection background is composited in so the
+// dot stays readable against the row highlight.
+func (m *Model) getStatusDot(status string, selected bool) string {
+	// Match the colors used by greenStyle/yellowStyle/redStyle/grayStyle so
+	// the appearance is identical between selected and non-selected rows.
+	dark := components.DarkBackground
+	var (
+		green  = lipgloss.Color("#00DD00")
+		yellow = lipgloss.Color("#DDDD00")
+		red    = lipgloss.Color("#FF4444")
+		gray   = lipgloss.Color("#666666")
+	)
+	if !dark {
+		green = lipgloss.Color("#007700")
+		yellow = lipgloss.Color("#886600")
+		red = lipgloss.Color("#CC0000")
+		gray = lipgloss.Color("#888888")
+	}
+
 	switch status {
 	case "RUNNING":
-		return greenStyle.Render("●") // Green filled circle for running
+		return dotStyle(green, selected).Render("●")
 	case "STOPPED":
-		return grayStyle.Render("○") // Gray empty circle for stopped
+		return dotStyle(gray, selected).Render("○")
 	case "PAUSED":
-		return yellowStyle.Render("●") // Yellow filled circle for paused (warning state)
+		return dotStyle(yellow, selected).Render("●")
 	case "ERROR":
-		return redStyle.Render("●") // Red filled circle for error (attention needed)
+		return dotStyle(red, selected).Render("●")
 	case "RESTARTING":
-		return yellowStyle.Render("●") // Yellow filled circle for restarting (warning state)
+		return dotStyle(yellow, selected).Render("●")
 	default:
-		return grayStyle.Render("○") // Gray empty circle for unknown
+		return dotStyle(gray, selected).Render("○")
 	}
 }
 
 // getImageStatusDot returns a colored status indicator based on image status
-func (m *Model) getImageStatusDot(img types.Image) string {
-	if img.InUse {
-		return greenStyle.Render("●") // Green filled circle for in-use images
-	} else if img.Dangling {
-		return redStyle.Render("●") // Red filled circle for dangling images (warning)
+func (m *Model) getImageStatusDot(img types.Image, selected bool) string {
+	dark := components.DarkBackground
+	green := lipgloss.Color("#00DD00")
+	red := lipgloss.Color("#FF4444")
+	gray := lipgloss.Color("#666666")
+	if !dark {
+		green = lipgloss.Color("#007700")
+		red = lipgloss.Color("#CC0000")
+		gray = lipgloss.Color("#888888")
 	}
-	return grayStyle.Render("○") // Gray empty circle for unused images
+	if img.InUse {
+		return dotStyle(green, selected).Render("●")
+	} else if img.Dangling {
+		return dotStyle(red, selected).Render("●")
+	}
+	return dotStyle(gray, selected).Render("○")
+}
+
+// getInUseDot returns a green ●/gray ○ for volumes & networks (in-use flag)
+func (m *Model) getInUseDot(inUse bool, selected bool) string {
+	dark := components.DarkBackground
+	green := lipgloss.Color("#00DD00")
+	gray := lipgloss.Color("#666666")
+	if !dark {
+		green = lipgloss.Color("#007700")
+		gray = lipgloss.Color("#888888")
+	}
+	if inUse {
+		return dotStyle(green, selected).Render("●")
+	}
+	return dotStyle(gray, selected).Render("○")
 }
 
 // truncateWithEllipsis truncates a string to max length with ellipsis
@@ -914,6 +1228,7 @@ func (m *Model) getActionShortcuts() string {
 	case 1: // Images
 		shortcuts = []string{
 			renderShortcut("S", "tart"),
+			renderShortcut("P", "ull image"),
 			renderShortcut("I", "nspect"),
 			renderShortcut("D", "elete"),
 		}
@@ -931,7 +1246,7 @@ func (m *Model) getActionShortcuts() string {
 
 	// Add common shortcuts
 	shortcuts = append(shortcuts,
-		renderShortcut("H", "elp"),
+		renderShortcut("?", " Help"),
 	)
 
 	return strings.Join(shortcuts, " ")

@@ -320,25 +320,14 @@ func (t TableComponent) View() string {
 
 				for j, cell := range row.Cells {
 					if j < len(t.headers) {
-						if j == 0 && (strings.Contains(cell, "●") || strings.Contains(cell, "○")) {
-							if row.IsSelected {
-								// cell already contains ANSI codes — wrapping them
-								// with another Render produces invisible output on the
-								// blue bg. Extract the raw rune and re-render cleanly.
-								dotChar := "●"
-								if strings.Contains(cell, "○") {
-									dotChar = "○"
-								}
-								// dot is always 1 terminal cell wide; pad with spaces
-								// rather than padRight which slices by bytes and corrupts
-								// multi-byte Unicode runes like ● (3 bytes).
-								dotText := dotChar + strings.Repeat(" ", t.headers[j].Width-1)
-								b.WriteString(selectedCellStyle.Render(dotText))
-							} else {
-								b.WriteString(cell)
-								if t.headers[j].Width > 1 {
-									b.WriteString(normalCellStyle.Render(strings.Repeat(" ", t.headers[j].Width-1)))
-								}
+						if j == 0 && isStatusGlyph(cell) {
+							// The cell already carries its own fg color (and bg
+							// when the row is selected — set by the caller).
+							// Write it as-is so the status color stays visible,
+							// then pad the column with the row's background.
+							b.WriteString(cell)
+							if t.headers[j].Width > 1 {
+								b.WriteString(spacerStyle.Render(strings.Repeat(" ", t.headers[j].Width-1)))
 							}
 						} else {
 							var cellText string
@@ -504,6 +493,22 @@ func (d DetailViewComponent) View() string {
 	}
 
 	return b.String()
+}
+
+// isStatusGlyph reports whether a cell carries one of the single-cell glyphs
+// used in the status column (filled/empty dot or any braille spinner frame).
+// These cells are multi-byte UTF-8 and must not be passed through padRight,
+// which would slice them in the middle of a rune.
+func isStatusGlyph(cell string) bool {
+	if strings.Contains(cell, "●") || strings.Contains(cell, "○") {
+		return true
+	}
+	for _, frame := range []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"} {
+		if strings.Contains(cell, frame) {
+			return true
+		}
+	}
+	return false
 }
 
 // stripAnsiCodes removes ANSI escape sequences for length calculation

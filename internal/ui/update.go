@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -59,12 +60,35 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case types.ActionSuccessMsg:
 		m.statusMessage = string(msg)
 		m.actionInProgress = false
-		// Refresh data after successful action
+		m.actionLabel = ""
+		m.actionTargetID = ""
+		// If we were in the pull flow, return to the list view
+		if m.currentView == types.ViewModePullImage {
+			m.currentView = types.ViewModeList
+			m.pullStage = 0
+			m.pullSearchQuery = ""
+			m.pullSearchResults = nil
+			m.pullingImageName = ""
+			return m, tea.Batch(m.fetchContainersCmd(), m.fetchImagesCmd())
+		}
 		return m, m.fetchContainersCmd()
 
 	case types.ActionErrorMsg:
 		m.statusMessage = "ERROR: " + string(msg)
 		m.actionInProgress = false
+		m.actionLabel = ""
+		m.actionTargetID = ""
+		// If a search failed, drop back to the input stage so the user can retry
+		if m.currentView == types.ViewModePullImage && m.pullStage == 1 {
+			m.pullStage = 0
+			m.pullSearchError = string(msg)
+		}
+		// If a pull failed, also return to list view
+		if m.currentView == types.ViewModePullImage && m.pullStage == 3 {
+			m.currentView = types.ViewModeList
+			m.pullStage = 0
+			m.pullingImageName = ""
+		}
 		return m, nil
 
 	case types.LogsMsg:
@@ -74,6 +98,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case types.InspectMsg:
 		// Show prettified JSON with jq-style color coding
 		m.inspectContent = colorizeJSON(string(msg))
+		return m, nil
+
+	case types.ImageSearchMsg:
+		m.pullSearchResults = []types.ImageSearchItem(msg)
+		m.pullSearchSelected = 0
+		m.pullSearchScrollOffset = 0
+		m.pullStage = 2
 		return m, nil
 
 	case types.TickMsg:
@@ -140,17 +171,11 @@ func (m *Model) handleResize(msg tea.WindowSizeMsg) (tea.Model, tea.Cmd) {
 // handleKeyPress routes keypresses based on current state
 // This is a simplified version - the full implementation would handle all keys
 func (m *Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	// Block input during actions
-	if m.actionInProgress {
-		return m, nil
-	}
-
 	key := msg.String()
 
-	// Global keys (work in all modes)
-	switch key {
-	case "ctrl+c":
-		// Double Ctrl+C to exit
+	// Ctrl+C always works, even while an action is in flight, so the user
+	// can quit if a Docker call hangs.
+	if key == "ctrl+c" {
 		now := time.Now()
 		if now.Sub(m.lastCtrlC) < 500*time.Millisecond {
 			return m, tea.Quit
@@ -158,9 +183,18 @@ func (m *Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.lastCtrlC = now
 		m.statusMessage = "Press Ctrl+C again to exit"
 		return m, nil
+	}
+
+	// Global keys (work in all modes)
+	switch key {
 	case "H", "?":
 		m.showHelp = !m.showHelp
 		return m, nil
+	case "esc":
+		if m.showHelp {
+			m.showHelp = false
+			return m, nil
+		}
 	}
 
 	// Route to appropriate handler based on view
@@ -171,6 +205,8 @@ func (m *Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleLogsViewKeys(msg)
 	case types.ViewModeInspect:
 		return m.handleInspectViewKeys(msg)
+	case types.ViewModePullImage:
+		return m.handlePullViewKeys(msg)
 	default:
 		return m, nil
 	}
@@ -194,27 +230,36 @@ func (m *Model) handleListViewKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				// User confirmed delete
 				m.deleteConfirmMode = false
 				m.actionInProgress = true
+				m.statusMessage = ""
 
 				// Handle delete based on active tab
 				switch m.activeTab {
 				case 0: // Containers
 					if m.selectedRow < len(m.containers) {
 						container := m.containers[m.selectedRow]
+						m.actionLabel = "Deleting " + container.Name
+						m.actionTargetID = container.ID
 						return m, m.deleteContainerCmd(container.ID, container.Name)
 					}
 				case 1: // Images
 					if m.selectedRow < len(m.images) {
 						image := m.images[m.selectedRow]
+						m.actionLabel = "Deleting " + image.Repository + ":" + image.Tag
+						m.actionTargetID = image.ID
 						return m, m.deleteImageCmd(image.ID)
 					}
 				case 2: // Volumes
 					if m.selectedRow < len(m.volumes) {
 						volume := m.volumes[m.selectedRow]
+						m.actionLabel = "Deleting " + volume.Name
+						m.actionTargetID = volume.Name
 						return m, m.deleteVolumeCmd(volume.Name)
 					}
 				case 3: // Networks
 					if m.selectedRow < len(m.networks) {
 						network := m.networks[m.selectedRow]
+						m.actionLabel = "Deleting " + network.Name
+						m.actionTargetID = network.ID
 						return m, m.deleteNetworkCmd(network.ID)
 					}
 				}
@@ -230,6 +275,7 @@ func (m *Model) handleListViewKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	switch key {
+	// Navigation — always allowed, even while an action is in progress
 	case "up", "k":
 		if m.selectedRow > 0 {
 			m.selectedRow--
@@ -249,10 +295,13 @@ func (m *Model) handleListViewKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case "left", "h", "right", "1", "2", "3", "4":
+	case "left", "right", "1", "2", "3", "4":
 		return m.handleTabSwitch(key)
 
 	case "enter":
+		if m.actionInProgress {
+			return m, nil
+		}
 		// Refresh on enter
 		switch m.activeTab {
 		case 0:
@@ -265,7 +314,14 @@ func (m *Model) handleListViewKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, m.fetchNetworksCmd()
 		}
 		return m, nil
+	}
 
+	// All remaining keys trigger actions — block them while one is running
+	if m.actionInProgress {
+		return m, nil
+	}
+
+	switch key {
 	// Container actions (only on Containers tab)
 	case "s", "S":
 		if m.activeTab == 0 {
@@ -311,6 +367,12 @@ func (m *Model) handleListViewKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "e", "E":
 		if m.activeTab == 0 {
 			return m.handleContainerExec()
+		}
+		return m, nil
+
+	case "p", "P":
+		if m.activeTab == 1 {
+			return m.handleImagePullSearch()
 		}
 		return m, nil
 
@@ -429,9 +491,15 @@ func (m *Model) handleContainerStartStop() (tea.Model, tea.Cmd) {
 	// Toggle start/stop based on current status
 	if container.Status == "RUNNING" {
 		m.actionInProgress = true
+		m.actionLabel = "Stopping " + container.Name
+		m.actionTargetID = container.ID
+		m.statusMessage = ""
 		return m, m.stopContainerCmd(container.ID, container.Name)
 	} else {
 		m.actionInProgress = true
+		m.actionLabel = "Starting " + container.Name
+		m.actionTargetID = container.ID
+		m.statusMessage = ""
 		return m, m.startContainerCmd(container.ID, container.Name)
 	}
 }
@@ -449,6 +517,9 @@ func (m *Model) handleContainerRestart() (tea.Model, tea.Cmd) {
 	}
 
 	m.actionInProgress = true
+	m.actionLabel = "Restarting " + container.Name
+	m.actionTargetID = container.ID
+	m.statusMessage = ""
 	return m, m.restartContainerCmd(container.ID, container.Name)
 }
 
@@ -535,6 +606,113 @@ func (m *Model) handleImageDelete() (tea.Model, tea.Cmd) {
 	m.deleteConfirmMode = !m.deleteConfirmMode
 	m.deleteConfirmOption = 1 // Default to "No"
 	return m, nil
+}
+
+// handleImagePullSearch enters the pull-from-Hub flow
+func (m *Model) handleImagePullSearch() (tea.Model, tea.Cmd) {
+	m.currentView = types.ViewModePullImage
+	m.pullStage = 0
+	m.pullSearchQuery = ""
+	m.pullSearchResults = nil
+	m.pullSearchSelected = 0
+	m.pullSearchScrollOffset = 0
+	m.pullSearchError = ""
+	m.statusMessage = ""
+	return m, nil
+}
+
+// handlePullViewKeys handles input in the pull image search flow
+func (m *Model) handlePullViewKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	key := msg.String()
+
+	// Esc always returns to the list view (but not mid-pull — Docker API
+	// can't cancel an in-progress pull, so don't pretend we did)
+	if key == "esc" && m.pullStage != 3 {
+		m.currentView = types.ViewModeList
+		m.pullStage = 0
+		m.pullSearchQuery = ""
+		m.pullSearchResults = nil
+		m.pullSearchError = ""
+		return m, nil
+	}
+
+	switch m.pullStage {
+	case 0: // input
+		switch key {
+		case "enter":
+			q := strings.TrimSpace(m.pullSearchQuery)
+			if q == "" {
+				return m, nil
+			}
+			m.pullStage = 1
+			m.pullSearchError = ""
+			return m, m.searchImagesCmd(q)
+		case "backspace":
+			if len(m.pullSearchQuery) > 0 {
+				m.pullSearchQuery = m.pullSearchQuery[:len(m.pullSearchQuery)-1]
+			}
+			return m, nil
+		default:
+			// Accept printable characters
+			if len(key) == 1 {
+				r := key[0]
+				if r >= 0x20 && r < 0x7f {
+					m.pullSearchQuery += key
+				}
+			}
+			return m, nil
+		}
+
+	case 1: // searching — only esc handled above
+		return m, nil
+
+	case 2: // results
+		switch key {
+		case "up", "k":
+			if m.pullSearchSelected > 0 {
+				m.pullSearchSelected--
+				if m.pullSearchSelected < m.pullSearchScrollOffset {
+					m.pullSearchScrollOffset = m.pullSearchSelected
+				}
+			}
+			return m, nil
+		case "down", "j":
+			if m.pullSearchSelected < len(m.pullSearchResults)-1 {
+				m.pullSearchSelected++
+				visible := m.pullResultsViewportHeight()
+				if m.pullSearchSelected >= m.pullSearchScrollOffset+visible {
+					m.pullSearchScrollOffset = m.pullSearchSelected - visible + 1
+				}
+			}
+			return m, nil
+		case "enter":
+			if m.pullSearchSelected >= len(m.pullSearchResults) {
+				return m, nil
+			}
+			img := m.pullSearchResults[m.pullSearchSelected]
+			m.pullStage = 3
+			m.pullingImageName = img.Name
+			m.actionInProgress = true
+			m.statusMessage = "Pulling " + img.Name + "..."
+			return m, m.pullSearchCompleteCmd(img.Name)
+		}
+		return m, nil
+
+	case 3: // pulling — ignore input
+		return m, nil
+	}
+
+	return m, nil
+}
+
+// pullResultsViewportHeight returns how many result rows can fit on screen
+func (m *Model) pullResultsViewportHeight() int {
+	// height - header(1) - divider(1) - query line(1) - results header(2) - action bar(3) - margin(2)
+	h := m.height - 10
+	if h < 3 {
+		h = 3
+	}
+	return h
 }
 
 // Volume action handlers

@@ -69,6 +69,38 @@ func (c *Client) DeleteImage(ctx context.Context, imageID string, force bool) er
 	return nil
 }
 
+// SearchImages searches Docker Hub for images matching the given term.
+func (c *Client) SearchImages(ctx context.Context, term string, limit int) ([]types.ImageSearchItem, error) {
+	if ctx == nil {
+		var cancel context.CancelFunc
+		ctx, cancel = c.WithCustomTimeout(TimeoutMedium)
+		defer cancel()
+	}
+
+	if limit <= 0 {
+		limit = 25
+	}
+
+	result, err := c.cli.ImageSearch(ctx, term, client.ImageSearchOptions{Limit: limit})
+	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			return nil, fmt.Errorf("search timed out after %s", TimeoutMedium)
+		}
+		return nil, fmt.Errorf("failed to search images: %w", err)
+	}
+
+	items := make([]types.ImageSearchItem, 0, len(result.Items))
+	for _, r := range result.Items {
+		items = append(items, types.ImageSearchItem{
+			Name:        r.Name,
+			Description: r.Description,
+			Stars:       r.StarCount,
+			Official:    r.IsOfficial,
+		})
+	}
+	return items, nil
+}
+
 // PullImage pulls an image from a registry
 func (c *Client) PullImage(ctx context.Context, imageName string) error {
 	if ctx == nil {

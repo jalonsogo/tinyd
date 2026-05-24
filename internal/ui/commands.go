@@ -92,10 +92,13 @@ func (m *Model) startContainerCmd(containerID, containerName string) tea.Cmd {
 	}
 }
 
-// stopContainerCmd stops a container
+// stopContainerCmd stops a container. Uses a longer timeout than the default
+// 10s because Docker's own SIGTERM grace period is 10s — anything shorter
+// would race with Docker's own clock and surface a spurious DeadlineExceeded
+// even when the container actually stopped.
 func (m *Model) stopContainerCmd(containerID, containerName string) tea.Cmd {
 	return func() tea.Msg {
-		ctx, cancel := m.docker.WithTimeout()
+		ctx, cancel := m.docker.WithCustomTimeout(30 * time.Second)
 		defer cancel()
 
 		if err := m.docker.StopContainer(ctx, containerID); err != nil {
@@ -105,10 +108,11 @@ func (m *Model) stopContainerCmd(containerID, containerName string) tea.Cmd {
 	}
 }
 
-// restartContainerCmd restarts a container
+// restartContainerCmd restarts a container. Same rationale as stopContainerCmd
+// — restart is stop+start with a 10s grace, so we give ourselves headroom.
 func (m *Model) restartContainerCmd(containerID, containerName string) tea.Cmd {
 	return func() tea.Msg {
-		ctx, cancel := m.docker.WithTimeout()
+		ctx, cancel := m.docker.WithCustomTimeout(30 * time.Second)
 		defer cancel()
 
 		if err := m.docker.RestartContainer(ctx, containerID); err != nil {
@@ -172,6 +176,20 @@ func (m *Model) deleteImageCmd(imageID string) tea.Cmd {
 	}
 }
 
+// searchImagesCmd searches Docker Hub for images
+func (m *Model) searchImagesCmd(query string) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := m.docker.WithCustomTimeout(docker.TimeoutMedium)
+		defer cancel()
+
+		results, err := m.docker.SearchImages(ctx, query, 25)
+		if err != nil {
+			return types.ActionErrorMsg(err.Error())
+		}
+		return types.ImageSearchMsg(results)
+	}
+}
+
 // pullImageCmd pulls an image
 func (m *Model) pullImageCmd(imageName string) tea.Cmd {
 	return func() tea.Msg {
@@ -182,6 +200,23 @@ func (m *Model) pullImageCmd(imageName string) tea.Cmd {
 			return types.ActionErrorMsg(err.Error())
 		}
 		return types.ActionSuccessMsg("Image " + imageName + " pulled successfully")
+	}
+}
+
+// pullSearchCompleteCmd pulls an image and ensures the user is returned to the
+// list view (the generic pull command returns ActionSuccessMsg which doesn't
+// reset currentView). We chain a final state-reset message so completion exits
+// the pull flow cleanly.
+func (m *Model) pullSearchCompleteCmd(imageName string) tea.Cmd {
+	// Use the longer pull timeout
+	return func() tea.Msg {
+		ctx, cancel := m.docker.WithCustomTimeout(docker.TimeoutLong)
+		defer cancel()
+
+		if err := m.docker.PullImage(ctx, imageName); err != nil {
+			return types.ActionErrorMsg("Failed to pull " + imageName + ": " + err.Error())
+		}
+		return types.ActionSuccessMsg("Pulled " + imageName)
 	}
 }
 

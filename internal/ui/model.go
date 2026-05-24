@@ -36,6 +36,8 @@ type Model struct {
 	loading          bool
 	statusMessage    string
 	actionInProgress bool
+	actionLabel      string // verb+target shown next to spinner while actionInProgress
+	actionTargetID   string // ID/name of the row being acted on (for inline spinner)
 	err              error
 	animationFrame   int // For animated status indicators
 	lastCtrlC        time.Time // For double Ctrl+C detection
@@ -86,6 +88,16 @@ type Model struct {
 
 	// Pull image modal
 	pullImageName string
+
+	// Pull image search flow (p in Images tab)
+	// pullStage: 0 = input, 1 = searching, 2 = results, 3 = pulling
+	pullStage              int
+	pullSearchQuery        string
+	pullSearchResults      []types.ImageSearchItem
+	pullSearchSelected     int
+	pullSearchScrollOffset int
+	pullSearchError        string
+	pullingImageName       string // image currently being pulled (stage 3)
 
 	// List search (inline filter)
 	listSearchMode  bool

@@ -168,7 +168,7 @@ func (c *Client) StopContainer(ctx context.Context, containerID string) error {
 	_, err := c.cli.ContainerStop(ctx, containerID, client.ContainerStopOptions{Timeout: &timeout})
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
-			return fmt.Errorf("stop operation timed out after %s", TimeoutMedium)
+			return fmt.Errorf("stop operation timed out")
 		}
 		return fmt.Errorf("failed to stop container: %w", err)
 	}
@@ -187,7 +187,7 @@ func (c *Client) RestartContainer(ctx context.Context, containerID string) error
 	_, err := c.cli.ContainerRestart(ctx, containerID, client.ContainerRestartOptions{Timeout: &timeout})
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
-			return fmt.Errorf("restart operation timed out after %s", TimeoutMedium)
+			return fmt.Errorf("restart operation timed out")
 		}
 		return fmt.Errorf("failed to restart container: %w", err)
 	}

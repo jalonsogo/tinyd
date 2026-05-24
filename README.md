@@ -128,30 +128,30 @@ Network topology at a glance:
 |-----|--------|
 | `↑` / `k` | Move selection up (with auto-scroll) |
 | `↓` / `j` | Move selection down (with auto-scroll) |
-| `←` / `h` | Previous tab |
-| `→` / `l` | Next tab |
+| `←` / `→` | Previous / next tab |
 | `1-4` | Jump directly to tab |
+
+> Navigation keys remain active even while a Docker action (stop, restart, delete, pull...) is in flight — only the action keys themselves are temporarily blocked to prevent queuing.
 
 ### Universal Actions
 | Key | Action |
 |-----|--------|
 | `i` | Inspect selected resource |
-| `D` | Delete selected resource |
-| `f` | Open filter modal |
-| `F1` | Toggle help screen |
-| `ESC` | Return to list view |
-| `Enter` | Refresh / Confirm |
-| `q` / `Ctrl+C` | Quit application |
+| `d` | Delete selected resource |
+| `?` / `Shift+H` | Toggle help overlay |
+| `ESC` | Close overlay / return to list |
+| `Enter` | Refresh / confirm |
+| `Ctrl+C` ×2 | Quit application |
 
 ### Tab-Specific Actions
 | Key | Tab | Action |
 |-----|-----|--------|
-| `s` | Containers | Start/Stop container |
+| `s` | Containers | Start / Stop container (toggles by status) |
 | `r` | Containers | Restart container |
-| `c` | Containers | Open console (altscreen) |
-| `o` | Containers | Open port in browser |
+| `e` | Containers | Open interactive shell (`docker exec -it`) |
 | `l` | Containers | View logs |
-| `R` | Images | Run new container |
+| `s` | Images | Run a new container from the selected image |
+| `p` | Images | Pull image from Docker Hub (search + select) |
 
 ## 🎯 Use Cases
 

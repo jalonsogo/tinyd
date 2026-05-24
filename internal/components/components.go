@@ -162,9 +162,9 @@ func (t TabsComponent) View() string {
 			b.WriteString(strings.Repeat(" ", tabWidth))
 			b.WriteString(activeBorderStyle.Render("╰"))
 		} else {
-			b.WriteString(activeBorderStyle.Render("┴"))
+			b.WriteString(activeBorderStyle.Render("─"))
 			b.WriteString(activeBorderStyle.Render(strings.Repeat("─", tabWidth)))
-			b.WriteString(activeBorderStyle.Render("┴"))
+			b.WriteString(activeBorderStyle.Render("─"))
 		}
 	}
 

@@ -4,6 +4,13 @@ All notable changes to tinyd will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.3.0](https://github.com/jalonsogo/tinyd/compare/v0.2.0...v0.3.0) (2026-05-25)
+
+
+### Features
+
+* in-app model chat, variant picker, customizable columns, UI polish ([b2c2aab](https://github.com/jalonsogo/tinyd/commit/b2c2aab0499f66ab345abd965558026767f96894))
+
 ## [0.2.0](https://github.com/jalonsogo/tinyd/compare/v0.1.0...v0.2.0) (2026-05-24)
 
 

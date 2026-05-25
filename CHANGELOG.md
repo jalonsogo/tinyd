@@ -14,34 +14,46 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
-- **Models tab (Docker Model Runner)** — Fifth tab managing AI models via DMR's HTTP API on `localhost:12434`. List local models, inspect (raw JSON), delete with confirmation, pull from Docker Hub's `ai/` namespace using the existing pull-search flow, and `R` to open the chat REPL (`docker model run`). DMR availability is probed on startup; when absent the tab renders a friendly pointer to the docs instead of an error. Configurable via `DMR_BASE_URL`. See `docs/AI_MODELS_PLAN.md` for design notes.
-- **Pull from Docker Hub** — Press `P` on the Images tab to search Docker Hub (`docker search` via the API). Type a query, browse results with `↑/↓`, press `Enter` to pull, `Esc` to cancel. The pulling stage shows an animated braille spinner and the image name.
-- **In-row action spinner** — While an action runs, the affected row's status dot is replaced with a cyan animated spinner so feedback is visible directly in the list, not just in the action bar.
-- **Working help overlay** — `?` (or `Shift+H`) toggles a keybinding panel rendered over the tab content; `Esc` closes it. Previously the keybinding existed but rendered nothing.
-- **Full-screen logs view** - Logs now use the entire terminal height instead of fixed 15 lines
-- **Fuzzy search in logs** - Press `S` in logs view to search with case-insensitive substring filtering
-- **Case-insensitive keyboard shortcuts** - All letter key triggers work with both uppercase and lowercase
-- **Transparent terminal support** - Removed all background colors for better terminal transparency
+- **Interactive Run-image modal** — `R` on the Images tab opens a full-screen form for `name`, port mappings (`host:container`), env vars (`KEY=value`), and volumes. Volume entries support three sources via a sub-picker:
+  - **Existing volume** picked from the Volumes tab
+  - **New named volume** (name + container path)
+  - **Bind mount** via a built-in directory browser (↑/↓ navigate, Enter descends, `F` confirms the current directory)
+  TAB cycles fields, ENTER commits the current input row to its list, Ctrl+R submits, ESC cancels.
+- **Update image to latest** — `U` on the Images tab re-pulls the selected image's `repo:tag` and reports "Updated <ref> to latest". Untagged / dangling images surface a clear "Can't update an untagged image" status instead of failing silently.
+- **In-app streaming model chat** — `C` on the Models tab opens a full-screen chat with the selected model via DMR's OpenAI-compatible endpoint (`/engines/llama.cpp/v1/chat/completions`, `stream:true`). Transcript shows `you ▎` / `bot ▎` turns, a spinner indicates generation, PgUp/PgDn scroll, `Ctrl+L` clears history, ESC exits and tears down the stream.
+- **Model variant (tag) picker** — pulling a model now detours through an intermediate screen that fetches the tag list from Docker Hub (`/v2/repositories/<repo>/tags/`), parses **Parameters** (e.g. `7B`) and **Quantization** (e.g. `q4_K_M`) from each tag name, and shows a table of `TAG | PARAMS | QUANT | SIZE | UPDATED`. ↑/↓ to navigate, Enter pulls the specific tag.
+- **DMR API info panel** — pinned to the bottom of the Models tab, shows the OpenAI-compatible endpoint, the currently-selected model ref, and a copy-pasteable `curl` example.
+- **Theme detection + override** — auto-detects light/dark terminal background via `TERM_BACKGROUND`, `COLORFGBG`, and lipgloss OSC-11. Override with `TINYD_THEME=light` or `TINYD_THEME=dark`. Tab labels, table headers, and emphasis text use bold + the terminal's default foreground so they stay readable even when detection guesses wrong.
+- **Models tab (Docker Model Runner)** — Fifth tab managing AI models via DMR's HTTP API on `localhost:12434`. List local models, inspect (raw JSON), delete with confirmation, pull from Docker Hub's `ai/` namespace, and chat / REPL with running models. DMR availability is probed on startup; when absent the tab renders a friendly pointer to the docs instead of an error. Configurable via `DMR_BASE_URL`. See `docs/AI_MODELS_PLAN.md` for design notes.
+- **Pull from Docker Hub** — `P` on the Images tab to search Docker Hub. Type a query, browse results with `↑/↓`, press Enter to pull, ESC to cancel. The pulling stage shows an animated braille spinner and the image name.
+- **In-row action spinner** — while an action runs, the affected row's status dot is replaced with a cyan animated spinner so feedback is visible directly in the list, not just in the action bar.
+- **Working help overlay** — `?` (or `Shift+H`) toggles a keybinding panel rendered over the tab content; ESC closes it.
+- **Full-screen logs view** — logs now use the entire terminal height instead of fixed 15 lines.
+- **Substring search in logs** — `S` in the logs view activates a case-insensitive filter.
 
 ### Changed
-- **Help shortcut moved from `H` to `?`** in the action bar — lowercase `h` was always intercepted by the vim-style left binding before reaching the help handler. The on-screen label and accepted key are now consistent.
-- **Action bar always reflects current tab + selection** — when an action posted a status message, the shortcut list used to stay stuck on the previously-rendered tab's shortcuts. It now recomputes every render.
-- **Navigation works during actions** — `↑/↓/j/k`, `←/→`, `1–4` and `Ctrl+C` are now allowed while a Docker call is in flight. Only the action keys (`s/r/l/e/i/d/p/Enter`) are blocked, to prevent queuing a second operation.
-- **`h` no longer switches tabs** — it kept colliding with the delete-confirm Yes selector and the help intent; arrows and `1–4` are the canonical tab nav.
-- **Stop/restart command timeout bumped to 30 s** — was 10 s, which raced with Docker's own 10 s SIGTERM grace period (see Fixed).
-- **Pull image action bar label** — `P`ull → `P`ull image, to make the destructive nature clearer.
-- Logs view now displays search button `[Search]` with S underscored in header
-- When search is activated, input field appears: `[Search: query█]`
-- Scroll position resets automatically when search query changes
-- Run container modal (`R` key) now context-aware on images tab
+- **Chat key is `C`, REPL is `R` / `Shift+R`** on the Models tab — the in-app streaming chat lives on `C`; plain `R` (and `Shift+R`) drops to the shell `docker model run` REPL for muscle memory.
+- **`R` opens the Run modal on Images** (was `S` "Start"). Shortcut bar shows `Run` with `R` underlined.
+- **Pull-image shortcut visually separated** from per-image operations: `R Run  U pdate to latest  I nspect  D elete │ P ull image`.
+- **Model delete / inspect URL fixed** — DMR expects `/models/<ns>/<name>:<tag>` (colon preserved), not `/models/<ns>/<name>/<tag>`. Delete and inspect now build the path correctly.
+- **Star glyph in pull-search header** changed from `★` to `⭐` for better terminal font coverage.
+- **Help-toggle skipped in text-input views** — `H` / `?` no longer trigger the help overlay while typing in chat, the Run modal, the volume picker, or the pull-search input, so capital letters and `?` reach the input field.
+- **Action bar always reflects current tab + selection** — recomputes every render.
+- **Navigation works during actions** — `↑/↓/j/k`, `←/→`, `1–5`, and `Ctrl+C` are allowed while a Docker call is in flight. Only the action keys are blocked, to prevent queuing a second operation.
+- **Stop/restart command timeout bumped to 30 s** — was 10 s, which raced with Docker's own 10 s SIGTERM grace period.
+
+### Removed
+- **`c` shortcut for "Open interactive shell with altscreen"** on Containers — never existed in code (the exec shortcut is `e`). `c` is now bound to Chat on Models. Documentation was wrong.
+- **`o` shortcut for "Open exposed ports in browser"** — no such handler exists in code; documentation was wrong.
+- **`f` filter modal** for Images (All / In Use / Unused / Dangling) and Networks (Active / Unused) — the filter state fields exist on the model but the `f` key is only bound inside the file browser. No filter UI is reachable. Documentation was wrong.
 
 ### Fixed
-- **Spurious "stop operation timed out after 15s" errors** — the Go context (10 s default) raced with Docker's hardcoded 10 s SIGTERM grace period, so a normal `docker stop` could surface `DeadlineExceeded` even though the container actually stopped in the background. The context is now 30 s, and the error message no longer hard-codes a misleading duration.
-- **Selected-row status dot was invisible** — the table component re-rendered the dot with the selection style, stripping the status color. The dot now composites its status color over the selection background and stays readable.
-- **Inactive tabs showed extra `┴` joins** under the bottom border, producing visible ticks. Replaced with `─` so the rule reads as a continuous line.
-- Delete modal now properly displays in overlay mode
-- Fixed panic when containers have no names (added safety checks)
-- Status display correctly shows container states
+- **Spurious "stop operation timed out after 15s" errors** — Go context (10 s) raced with Docker's hardcoded 10 s SIGTERM grace period. Context is now 30 s; error message no longer hard-codes a misleading duration.
+- **Selected-row status dot was invisible** — the table component re-rendered the dot with the selection style, stripping the status color. The dot now composites its status color over the selection background.
+- **Inactive tabs showed extra `┴` joins** under the bottom border. Replaced with `─` so the rule reads continuous.
+- **Light-terminal contrast** — tab labels, table headers, shortcut keys, the DMR API panel values, and chat/title text now use bold + terminal-default foreground rather than `ColorBright` (which collapses to near-white on a light terminal when the dark palette is mistakenly loaded).
+- Delete modal now properly displays in overlay mode.
+- Fixed panic when containers have no names (added safety checks).
 
 ## [Previous Features]
 

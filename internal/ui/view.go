@@ -1133,11 +1133,11 @@ func (m *Model) renderHelpOverlay() string {
 	row("D", "Delete")
 
 	section("Images")
-	row("R", "Run image (name / ports / volumes / env)")
+	row("S", "Run image")
 	row("U", "Update to latest")
 	row("I", "Inspect")
 	row("D", "Delete")
-	row("P", "Pull image (search Docker Hub)")
+	row("P", "Add image (search Docker Hub)")
 
 	section("Volumes / Networks")
 	row("I", "Inspect")
@@ -1180,7 +1180,7 @@ func (m *Model) renderPullView() string {
 	errorStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#FF4444"))
 
 	// Header
-	headerText := "Pull image from Docker Hub"
+	headerText := "Add image from Docker Hub"
 	if m.currentView == types.ViewModePullModel {
 		headerText = "Pull model from Docker Hub"
 	}

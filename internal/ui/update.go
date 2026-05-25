@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"bufio"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -158,6 +160,51 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.pullStage = 2
 		return m, nil
 
+	case types.ModelTagsMsg:
+		m.tagPickerLoading = false
+		if msg.Repo != m.tagPickerRepo {
+			// Late response — user picked a different repo or backed out.
+			return m, nil
+		}
+		m.tagPickerTags = msg.Tags
+		m.tagPickerIndex = 0
+		m.tagPickerScroll = 0
+		return m, nil
+
+	case types.ChatStartedMsg:
+		// Store the live reader/body on the model and kick off the
+		// chunk-reading loop. Cast back from interface{} (types/ keeps
+		// the message struct free of bufio/io imports).
+		if r, ok := msg.Reader.(*bufio.Reader); ok {
+			m.chatReader = r
+		}
+		if b, ok := msg.Body.(io.Closer); ok {
+			m.chatBody = b
+		}
+		return m, m.readChatChunkCmd()
+
+	case types.ChatTokenMsg:
+		if msg.Err != "" {
+			m.closeChatStream()
+			m.chatError = msg.Err
+			m.chatStreaming = false
+			return m, nil
+		}
+		if msg.Done {
+			// Commit the assistant message and reset live state.
+			if m.chatCurrentResponse != "" {
+				m.chatMessages = append(m.chatMessages, types.ChatMessage{
+					Role: "assistant", Content: m.chatCurrentResponse,
+				})
+			}
+			m.chatCurrentResponse = ""
+			m.chatStreaming = false
+			m.closeChatStream()
+			return m, nil
+		}
+		m.chatCurrentResponse += msg.Token
+		return m, m.readChatChunkCmd()
+
 	case types.TickMsg:
 		// Refresh data periodically (only if no action in progress)
 		if !m.actionInProgress {
@@ -246,16 +293,25 @@ func (m *Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	}
 
-	// Global keys (work in all modes)
-	switch key {
-	case "H", "?":
-		m.showHelp = !m.showHelp
-		return m, nil
-	case "esc":
-		if m.showHelp {
-			m.showHelp = false
+	// Global keys (work in all modes). The help toggle is skipped in
+	// text-input views so typing "Hello", "?", etc. doesn't trigger it.
+	inputView := m.currentView == types.ViewModeChat ||
+		m.currentView == types.ViewModeRunImage ||
+		m.currentView == types.ViewModeRunVolumePicker ||
+		m.currentView == types.ViewModePullImage ||
+		m.currentView == types.ViewModePullModel ||
+		(m.currentView == types.ViewModeList && m.listSearchMode)
+
+	if !inputView {
+		switch key {
+		case "H", "?":
+			m.showHelp = !m.showHelp
 			return m, nil
 		}
+	}
+	if key == "esc" && m.showHelp {
+		m.showHelp = false
+		return m, nil
 	}
 
 	// Route to appropriate handler based on view
@@ -274,6 +330,10 @@ func (m *Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleVolumePickerKeys(msg)
 	case types.ViewModeRunFileBrowser:
 		return m.handleFileBrowserKeys(msg)
+	case types.ViewModeChat:
+		return m.handleChatViewKeys(msg)
+	case types.ViewModeModelTagPicker:
+		return m.handleTagPickerKeys(msg)
 	default:
 		return m, nil
 	}
@@ -451,7 +511,20 @@ func (m *Model) handleListViewKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case "r", "R":
+	case "r":
+		if m.activeTab == types.TabContainers {
+			return m.handleContainerRestart()
+		}
+		if m.activeTab == types.TabImages {
+			return m.handleImageStart()
+		}
+		if m.activeTab == types.TabModels {
+			// Plain r on Models is the shell REPL fallback (same key as
+			// Shift+R, kept for muscle memory). The in-app chat lives on c.
+			return m.handleModelRun()
+		}
+		return m, nil
+	case "R":
 		if m.activeTab == types.TabContainers {
 			return m.handleContainerRestart()
 		}
@@ -462,10 +535,23 @@ func (m *Model) handleListViewKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m.handleModelRun()
 		}
 		return m, nil
+	case "c", "C":
+		if m.activeTab == types.TabModels {
+			return m.handleModelChat()
+		}
+		return m, nil
 
 	case "u", "U":
 		if m.activeTab == types.TabImages {
 			return m.handleImageUpdate()
+		}
+		return m, nil
+
+	case "y", "Y":
+		// Yank the curl example to the clipboard. Models tab only.
+		if m.activeTab == types.TabModels {
+			curl := m.currentCurlExample()
+			return m, m.copyToClipboardCmd(curl, "curl example")
 		}
 		return m, nil
 
@@ -863,13 +949,17 @@ func (m *Model) handlePullViewKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			img := m.pullSearchResults[m.pullSearchSelected]
+
+			// Models: detour through the tag picker so the user can choose
+			// a specific quantization variant. Images: pull immediately.
+			if m.currentView == types.ViewModePullModel {
+				return m.openModelTagPicker(img.Name)
+			}
+
 			m.pullStage = 3
 			m.pullingImageName = img.Name
 			m.actionInProgress = true
 			m.statusMessage = "Pulling " + img.Name + "..."
-			if m.currentView == types.ViewModePullModel {
-				return m, m.pullModelCmd(img.Name)
-			}
 			return m, m.pullSearchCompleteCmd(img.Name)
 		}
 		return m, nil
@@ -1376,4 +1466,164 @@ func listDir(path string) []string {
 	out = append(out, dirs...)
 	out = append(out, files...)
 	return out
+}
+
+// --- Chat with a DMR model ---
+
+// handleModelChat opens an in-app streaming chat with the selected model.
+func (m *Model) handleModelChat() (tea.Model, tea.Cmd) {
+	if m.selectedRow >= len(m.models) {
+		return m, nil
+	}
+	mod := m.models[m.selectedRow]
+	ref := mod.Repository + ":" + mod.Tag
+
+	// Start a fresh conversation each time R is pressed — previous
+	// history is dropped intentionally so the user isn't surprised by
+	// leftover context after navigating away.
+	m.chatModelRef = ref
+	m.chatMessages = nil
+	m.chatInput = ""
+	m.chatCurrentResponse = ""
+	m.chatStreaming = false
+	m.chatError = ""
+	m.chatScrollOffset = 0
+	m.closeChatStream()
+	m.currentView = types.ViewModeChat
+	return m, nil
+}
+
+func (m *Model) closeChatStream() {
+	if m.chatBody != nil {
+		_ = m.chatBody.Close()
+		m.chatBody = nil
+	}
+	m.chatReader = nil
+}
+
+func (m *Model) handleChatViewKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	key := msg.String()
+
+	switch key {
+	case "esc":
+		// Bail out — drop any in-flight stream.
+		m.closeChatStream()
+		m.chatStreaming = false
+		m.chatCurrentResponse = ""
+		m.currentView = types.ViewModeList
+		return m, nil
+	case "ctrl+l":
+		// Quick clear: wipe history but keep the model selection.
+		m.chatMessages = nil
+		m.chatCurrentResponse = ""
+		m.chatError = ""
+		return m, nil
+	case "pgup":
+		if m.chatScrollOffset > 5 {
+			m.chatScrollOffset -= 5
+		} else {
+			m.chatScrollOffset = 0
+		}
+		return m, nil
+	case "pgdown":
+		m.chatScrollOffset += 5
+		return m, nil
+	}
+
+	// While streaming the only useful input is ESC (handled above) — don't
+	// let the user type a new prompt while the previous one is generating.
+	if m.chatStreaming {
+		return m, nil
+	}
+
+	switch key {
+	case "enter":
+		prompt := strings.TrimSpace(m.chatInput)
+		if prompt == "" {
+			return m, nil
+		}
+		m.chatMessages = append(m.chatMessages, types.ChatMessage{
+			Role: "user", Content: prompt,
+		})
+		m.chatInput = ""
+		m.chatStreaming = true
+		m.chatCurrentResponse = ""
+		m.chatError = ""
+		return m, m.startChatCmd(m.chatModelRef, m.chatMessages)
+	case "backspace":
+		if len(m.chatInput) > 0 {
+			m.chatInput = m.chatInput[:len(m.chatInput)-1]
+		}
+		return m, nil
+	}
+
+	if len(key) == 1 && key[0] >= 32 && key[0] < 127 {
+		m.chatInput += key
+	}
+	return m, nil
+}
+
+// --- Model tag picker ---
+
+func (m *Model) openModelTagPicker(repo string) (tea.Model, tea.Cmd) {
+	m.tagPickerRepo = repo
+	m.tagPickerTags = nil
+	m.tagPickerIndex = 0
+	m.tagPickerScroll = 0
+	m.tagPickerLoading = true
+	m.tagPickerError = ""
+	m.currentView = types.ViewModeModelTagPicker
+	return m, m.fetchModelTagsCmd(repo)
+}
+
+func (m *Model) handleTagPickerKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	key := msg.String()
+
+	switch key {
+	case "esc":
+		// Back to the model search results (stage 2 of the pull flow).
+		m.currentView = types.ViewModePullModel
+		m.tagPickerTags = nil
+		m.tagPickerError = ""
+		return m, nil
+	case "up", "k":
+		if m.tagPickerIndex > 0 {
+			m.tagPickerIndex--
+			if m.tagPickerIndex < m.tagPickerScroll {
+				m.tagPickerScroll = m.tagPickerIndex
+			}
+		}
+		return m, nil
+	case "down", "j":
+		if m.tagPickerIndex < len(m.tagPickerTags)-1 {
+			m.tagPickerIndex++
+			visible := m.tagPickerViewportHeight()
+			if m.tagPickerIndex >= m.tagPickerScroll+visible {
+				m.tagPickerScroll = m.tagPickerIndex - visible + 1
+			}
+		}
+		return m, nil
+	case "enter":
+		if m.tagPickerLoading || m.tagPickerIndex >= len(m.tagPickerTags) {
+			return m, nil
+		}
+		tag := m.tagPickerTags[m.tagPickerIndex]
+		ref := m.tagPickerRepo + ":" + tag.Tag
+		// Reuse the existing pull flow (stage 3 = pulling).
+		m.currentView = types.ViewModePullModel
+		m.pullStage = 3
+		m.pullingImageName = ref
+		m.actionInProgress = true
+		m.statusMessage = "Pulling " + ref + "..."
+		return m, m.pullModelCmd(ref)
+	}
+	return m, nil
+}
+
+func (m *Model) tagPickerViewportHeight() int {
+	h := m.height - 10
+	if h < 5 {
+		h = 5
+	}
+	return h
 }

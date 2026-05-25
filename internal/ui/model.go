@@ -2,6 +2,8 @@
 package ui
 
 import (
+	"bufio"
+	"io"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -104,6 +106,26 @@ type Model struct {
 	fileBrowserEntries []string // sorted entries (dirs end with /)
 	fileBrowserIndex   int
 	fileBrowserScroll  int
+
+	// Model tag picker (intermediate screen between "select repo" in the
+	// model-pull search results and the actual pull).
+	tagPickerRepo    string
+	tagPickerTags    []types.ModelTagInfo
+	tagPickerIndex   int
+	tagPickerScroll  int
+	tagPickerLoading bool
+	tagPickerError   string
+
+	// Chat with a DMR model.
+	chatModelRef        string              // repo:tag the chat targets
+	chatMessages        []types.ChatMessage // committed conversation history
+	chatInput           string              // current user input
+	chatStreaming       bool                // true while the assistant is generating
+	chatCurrentResponse string              // tokens received so far for the in-flight reply
+	chatError           string              // surfaced once on a stream failure
+	chatScrollOffset    int                 // viewport scroll position in the transcript
+	chatReader          *bufio.Reader       // live SSE reader while streaming
+	chatBody            io.Closer           // underlying body to close at end of stream
 
 	// Pull image modal
 	pullImageName string

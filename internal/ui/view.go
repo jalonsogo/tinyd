@@ -75,6 +75,10 @@ func (m *Model) View() string {
 		return m.renderVolumePicker()
 	case types.ViewModeRunFileBrowser:
 		return m.renderFileBrowser()
+	case types.ViewModeChat:
+		return m.renderChatView()
+	case types.ViewModeModelTagPicker:
+		return m.renderTagPicker()
 	default:
 		return "Unknown view mode\n\nPress q to quit"
 	}
@@ -109,14 +113,23 @@ func (m *Model) renderListView() string {
 	}
 	b.WriteString(contentStr)
 
+	// On the Models tab we pin the API info panel just above the action
+	// bar, so the connection details are always visible at the bottom of
+	// the screen regardless of how many models are in the table.
+	var bottomPanel string
+	if !m.showHelp && m.activeTab == types.TabModels && m.dmrAvailable {
+		bottomPanel = m.renderModelsAPIPanel()
+	}
+
 	// Calculate padding to push action bar to bottom
 	// Count actual lines used (tabs + visible content rows + action bar)
 	tabsHeight := strings.Count(tabsContent, "\n")
 	contentHeight := strings.Count(contentStr, "\n")
+	panelHeight := strings.Count(bottomPanel, "\n")
 	actionBarHeight := 3
 
 	// Total used height including current content
-	usedHeight := tabsHeight + contentHeight + actionBarHeight + 2 // +2 for newlines
+	usedHeight := tabsHeight + contentHeight + panelHeight + actionBarHeight + 2 // +2 for newlines
 
 	// Add padding to push action bar to bottom
 	remainingHeight := m.height - usedHeight
@@ -125,6 +138,11 @@ func (m *Model) renderListView() string {
 	} else if remainingHeight < 0 {
 		// If content is too tall, don't add padding
 		b.WriteString("\n")
+	}
+
+	// Bottom panel sits just above the action bar.
+	if bottomPanel != "" {
+		b.WriteString(bottomPanel)
 	}
 
 	// Render action bar at bottom — always recompute actions for the current
@@ -569,7 +587,7 @@ func (m *Model) renderNetworksTab() string {
 // diagnosis + remediation; falls back to a wrapped raw message otherwise.
 func (m *Model) renderErrorScreen() string {
 	titleStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#FF4444")).Bold(true)
-	headingStyle := lipgloss.NewStyle().Foreground(components.ColorBright).Bold(true)
+	headingStyle := lipgloss.NewStyle().Bold(true)
 	bodyStyle := lipgloss.NewStyle().Foreground(components.ColorNormal)
 	dimStyle := lipgloss.NewStyle().Foreground(components.ColorDim)
 	codeStyle := lipgloss.NewStyle().Foreground(components.ColorHighlight)
@@ -681,7 +699,7 @@ func wrapForDisplay(s string, width int, indent string) string {
 func (m *Model) renderModelsTab() string {
 	if !m.dmrAvailable {
 		dim := lipgloss.NewStyle().Foreground(components.ColorDim)
-		bright := lipgloss.NewStyle().Foreground(components.ColorBright).Bold(true)
+		bright := lipgloss.NewStyle().Bold(true)
 		var b strings.Builder
 		b.WriteString("\n")
 		b.WriteString(bright.Render(" Docker Model Runner is not reachable"))
@@ -790,7 +808,7 @@ func defaultStr(s, fallback string) string {
 func (m *Model) renderLogsView() string {
 	var b strings.Builder
 
-	titleStyle := lipgloss.NewStyle().Foreground(components.ColorBright).Bold(true)
+	titleStyle := lipgloss.NewStyle().Bold(true)
 	helpStyle := lipgloss.NewStyle().Foreground(components.ColorNormal)
 	lineStyle := lipgloss.NewStyle().Foreground(components.ColorBorder)
 	contentStyle := lipgloss.NewStyle().Foreground(components.ColorNormal)
@@ -854,7 +872,7 @@ func (m *Model) renderLogsView() string {
 func (m *Model) renderInspectView() string {
 	var b strings.Builder
 
-	titleStyle := lipgloss.NewStyle().Foreground(components.ColorBright).Bold(true)
+	titleStyle := lipgloss.NewStyle().Bold(true)
 	helpStyle := lipgloss.NewStyle().Foreground(components.ColorNormal)
 	lineStyle := lipgloss.NewStyle().Foreground(components.ColorBorder)
 	contentStyle := lipgloss.NewStyle().Foreground(components.ColorNormal)
@@ -935,10 +953,13 @@ func (m *Model) currentStatusMessage() string {
 func (m *Model) renderHelpOverlay() string {
 	var b strings.Builder
 
-	titleStyle := lipgloss.NewStyle().Foreground(components.ColorBright).Bold(true)
-	sectionStyle := lipgloss.NewStyle().Foreground(components.ColorHighlight).Bold(true)
-	keyStyle := lipgloss.NewStyle().Foreground(components.ColorBright).Bold(true)
-	descStyle := lipgloss.NewStyle().Foreground(components.ColorNormal)
+	titleStyle := lipgloss.NewStyle().Bold(true)
+	// Section headers and key cells use bold-only — no accent color, so
+	// the help screen reads as one neutral block instead of a noisy
+	// rainbow.
+	sectionStyle := lipgloss.NewStyle().Bold(true).Underline(true)
+	keyStyle := lipgloss.NewStyle().Bold(true)
+	descStyle := lipgloss.NewStyle().Foreground(components.ColorDim)
 	dimStyle := lipgloss.NewStyle().Foreground(components.ColorDim)
 
 	row := func(key, desc string) {
@@ -985,8 +1006,10 @@ func (m *Model) renderHelpOverlay() string {
 	row("D", "Delete")
 
 	section("Models (Docker Model Runner)")
-	row("R", "Run / chat REPL")
-	row("P", "Pull model (search ai/ namespace)")
+	row("C", "Chat in-app (streaming)")
+	row("R", "Drop to docker model run REPL")
+	row("P", "Pull model (variant picker → tag / params / quant / size)")
+	row("Y", "Yank curl example to clipboard")
 	row("I", "Inspect")
 	row("D", "Delete")
 
@@ -1002,12 +1025,15 @@ func (m *Model) renderHelpOverlay() string {
 func (m *Model) renderPullView() string {
 	var b strings.Builder
 
-	titleStyle := lipgloss.NewStyle().Foreground(components.ColorBright).Bold(true)
-	helpStyle := lipgloss.NewStyle().Foreground(components.ColorNormal)
+	// Emphasis uses bold + terminal-default fg so it stays readable on
+	// either palette (ColorBright collapses to near-white on a light
+	// terminal under the dark palette).
+	titleStyle := lipgloss.NewStyle().Bold(true)
+	helpStyle := lipgloss.NewStyle().Foreground(components.ColorDim)
 	lineStyle := lipgloss.NewStyle().Foreground(components.ColorBorder)
 	dimStyle := lipgloss.NewStyle().Foreground(components.ColorDim)
-	normalStyle := lipgloss.NewStyle().Foreground(components.ColorNormal)
-	brightStyle := lipgloss.NewStyle().Foreground(components.ColorBright)
+	normalStyle := lipgloss.NewStyle()
+	brightStyle := lipgloss.NewStyle().Bold(true)
 	selectedStyle := lipgloss.NewStyle().
 		Background(components.ColorSelectedBg).
 		Foreground(components.ColorSelectedFg).
@@ -1088,7 +1114,7 @@ func (m *Model) renderPullView() string {
 		}
 
 		// Header row
-		header := padRightStr("★", starsW) + "  " +
+		header := padRightStr("⭐", starsW) + "  " +
 			padRightStr("OFF", officialW) + "  " +
 			padRightStr("NAME", nameW) + "  " +
 			padRightStr("ARCH", archW) + "  " +
@@ -1508,10 +1534,18 @@ func statusTextStatic(s string) (string, lipgloss.Color) {
 // renderStatusCell renders the STATUS column value with the right color,
 // applying the selection background when the row is selected so the
 // highlight remains continuous.
+//
+// On the selected row we drop the per-status color (red/yellow/etc.) and
+// use the selection foreground instead. Red text on blue background
+// causes chromatic aberration on most LCDs and is hard to read; the
+// colored dot in the leftmost column already carries the status signal.
 func (m *Model) renderStatusCell(text string, fg lipgloss.Color, width int, selected bool) string {
 	s := lipgloss.NewStyle().Foreground(fg)
 	if selected {
-		s = s.Background(components.ColorSelectedBg).Bold(true)
+		s = lipgloss.NewStyle().
+			Background(components.ColorSelectedBg).
+			Foreground(components.ColorSelectedFg).
+			Bold(true)
 	}
 	return s.Render(padRightStr(text, width))
 }
@@ -1567,7 +1601,7 @@ func truncateWithEllipsis(s string, max int) string {
 
 // renderDeleteConfirmation renders an inline delete confirmation message
 func renderDeleteConfirmation(name string, selectedOption int) string {
-	confirmStyle := lipgloss.NewStyle().Foreground(components.ColorBright).Bold(true)
+	confirmStyle := lipgloss.NewStyle().Bold(true)
 
 	// Active YES button: black text on green background
 	yesActiveStyle := lipgloss.NewStyle().
@@ -1658,10 +1692,13 @@ func (m *Model) getActionShortcuts() string {
 		}
 	case types.TabModels: // Docker Model Runner
 		shortcuts = []string{
-			renderShortcut("R", "un"),
-			renderShortcut("P", "ull model"),
+			renderShortcut("C", "hat"),
+			renderShortcut("R", "un (shell)"),
 			renderShortcut("I", "nspect"),
 			renderShortcut("D", "elete"),
+			lipgloss.NewStyle().Foreground(components.ColorBorder).Render("│"),
+			renderShortcut("P", "ull model"),
+			renderShortcut("Y", " Copy curl"),
 		}
 	}
 
@@ -1673,9 +1710,12 @@ func (m *Model) getActionShortcuts() string {
 	return strings.Join(shortcuts, " ")
 }
 
-// renderShortcut formats a keyboard shortcut with underscored first letter
+// renderShortcut formats a keyboard shortcut with the chord letter
+// underlined. The letter uses the terminal's default foreground + bold
+// (rather than ColorBright) so it stays visible even when the dark
+// palette has been loaded onto a light terminal.
 func renderShortcut(key string, rest ...string) string {
-	keyStyle := lipgloss.NewStyle().Foreground(components.ColorBright).Underline(true)
+	keyStyle := lipgloss.NewStyle().Bold(true).Underline(true)
 	textStyle := lipgloss.NewStyle().Foreground(components.ColorDim)
 
 	var b strings.Builder
@@ -1977,13 +2017,13 @@ func shortenTimeAgo(timeStr string) string {
 func (m *Model) renderRunModal() string {
 	var b strings.Builder
 
-	titleStyle := lipgloss.NewStyle().Foreground(components.ColorBright).Bold(true)
+	titleStyle := lipgloss.NewStyle().Bold(true)
 	helpStyle := lipgloss.NewStyle().Foreground(components.ColorNormal)
 	lineStyle := lipgloss.NewStyle().Foreground(components.ColorBorder)
 	dimStyle := lipgloss.NewStyle().Foreground(components.ColorDim)
 	normalStyle := lipgloss.NewStyle().Foreground(components.ColorNormal)
-	brightStyle := lipgloss.NewStyle().Foreground(components.ColorBright)
-	focusStyle := lipgloss.NewStyle().Foreground(components.ColorBright).Bold(true)
+	brightStyle := lipgloss.NewStyle().Bold(true)
+	focusStyle := lipgloss.NewStyle().Bold(true)
 	buttonStyle := lipgloss.NewStyle().
 		Background(components.ColorSelectedBg).
 		Foreground(components.ColorSelectedFg).
@@ -2083,7 +2123,7 @@ func (m *Model) renderRunModal() string {
 // sectionLabel renders a section header with a focus indicator.
 func sectionLabel(label string, focused bool) string {
 	if focused {
-		return lipgloss.NewStyle().Foreground(components.ColorBright).Bold(true).Render(" " + label)
+		return lipgloss.NewStyle().Bold(true).Render(" " + label)
 	}
 	return lipgloss.NewStyle().Foreground(components.ColorDim).Render(" " + label)
 }
@@ -2093,7 +2133,7 @@ func sectionLabel(label string, focused bool) string {
 func renderRunInput(value, placeholder string, focused bool, frame int) string {
 	normalStyle := lipgloss.NewStyle().Foreground(components.ColorNormal)
 	dimStyle := lipgloss.NewStyle().Foreground(components.ColorDim)
-	brightStyle := lipgloss.NewStyle().Foreground(components.ColorBright)
+	brightStyle := lipgloss.NewStyle().Bold(true)
 
 	if !focused {
 		if value == "" {
@@ -2115,12 +2155,12 @@ func renderRunInput(value, placeholder string, focused bool, frame int) string {
 // renderVolumePicker renders the volume-add sub-view.
 func (m *Model) renderVolumePicker() string {
 	var b strings.Builder
-	titleStyle := lipgloss.NewStyle().Foreground(components.ColorBright).Bold(true)
+	titleStyle := lipgloss.NewStyle().Bold(true)
 	helpStyle := lipgloss.NewStyle().Foreground(components.ColorNormal)
 	lineStyle := lipgloss.NewStyle().Foreground(components.ColorBorder)
 	dimStyle := lipgloss.NewStyle().Foreground(components.ColorDim)
 	normalStyle := lipgloss.NewStyle().Foreground(components.ColorNormal)
-	focusStyle := lipgloss.NewStyle().Foreground(components.ColorBright).Bold(true)
+	focusStyle := lipgloss.NewStyle().Bold(true)
 
 	header := "Add volume mount"
 	right := "[↑↓] Move  [ENTER] Select  [ESC] Back"
@@ -2160,7 +2200,7 @@ func (m *Model) renderVolumePicker() string {
 			b.WriteString(dimStyle.Render("(no volumes — press ESC and pick another option)"))
 			b.WriteString("\n")
 		} else {
-			pickedStyle := lipgloss.NewStyle().Foreground(components.ColorBright)
+			pickedStyle := lipgloss.NewStyle().Bold(true)
 			for i, v := range m.volumes {
 				selected := i == m.runVolumePickerIndex
 				prefix := "   "
@@ -2226,7 +2266,7 @@ func (m *Model) renderVolumePicker() string {
 // renderFileBrowser renders the host-path picker.
 func (m *Model) renderFileBrowser() string {
 	var b strings.Builder
-	titleStyle := lipgloss.NewStyle().Foreground(components.ColorBright).Bold(true)
+	titleStyle := lipgloss.NewStyle().Bold(true)
 	helpStyle := lipgloss.NewStyle().Foreground(components.ColorNormal)
 	lineStyle := lipgloss.NewStyle().Foreground(components.ColorBorder)
 	dimStyle := lipgloss.NewStyle().Foreground(components.ColorDim)
@@ -2277,7 +2317,7 @@ func (m *Model) renderFileBrowser() string {
 		} else {
 			b.WriteString("  ")
 			if isDir {
-				b.WriteString(lipgloss.NewStyle().Foreground(components.ColorBright).Render(display))
+				b.WriteString(lipgloss.NewStyle().Bold(true).Render(display))
 			} else {
 				b.WriteString(normalStyle.Render(display))
 			}
@@ -2291,4 +2331,304 @@ func (m *Model) renderFileBrowser() string {
 	}
 
 	return b.String()
+}
+
+// --- Chat view ---
+
+// renderChatView renders a full-screen chat with the selected model.
+// Layout:
+//
+//   Chat — ai/qwen2.5-coder:7b-instruct-q4_K_M          [Ctrl+L] Clear  [ESC] Exit
+//   ──────────────────────────────────────────────────────────────────────────
+//   you ▎ Explain Go interfaces
+//   bot ▎ In Go, an interface is a type that ...
+//
+//   you ▎ <streaming>
+//   ...
+//
+//   > _____________________________________________
+func (m *Model) renderChatView() string {
+	var b strings.Builder
+
+	titleStyle := lipgloss.NewStyle().Bold(true)
+	helpStyle := lipgloss.NewStyle().Foreground(components.ColorNormal)
+	lineStyle := lipgloss.NewStyle().Foreground(components.ColorBorder)
+	dimStyle := lipgloss.NewStyle().Foreground(components.ColorDim)
+	normalStyle := lipgloss.NewStyle().Foreground(components.ColorNormal)
+	brightStyle := lipgloss.NewStyle().Bold(true)
+	userTag := lipgloss.NewStyle().Foreground(components.ColorHighlight).Bold(true).Render("you")
+	botTag := lipgloss.NewStyle().Bold(true).Render("bot")
+	errStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#FF4444"))
+
+	// Header
+	header := "Chat — " + m.chatModelRef
+	right := "[ENTER] Send  [Ctrl+L] Clear  [PgUp/PgDn] Scroll  [ESC] Exit"
+	spacing := strings.Repeat(" ", max(1, m.width-len(header)-len(right)-4))
+	b.WriteString(titleStyle.Render(header))
+	b.WriteString(spacing)
+	b.WriteString(helpStyle.Render(right))
+	b.WriteString("\n")
+	b.WriteString(lineStyle.Render(strings.Repeat("─", m.width-2)))
+	b.WriteString("\n\n")
+
+	// Transcript area
+	transcriptWidth := m.width - 8
+	if transcriptWidth < 30 {
+		transcriptWidth = 30
+	}
+
+	renderTurn := func(role, content string) {
+		tag := botTag
+		style := normalStyle
+		if role == "user" {
+			tag = userTag
+			style = brightStyle
+		}
+		// First line gets the tag, continuation lines get a blank.
+		lines := wrapLines(content, transcriptWidth)
+		for i, line := range lines {
+			if i == 0 {
+				b.WriteString(" ")
+				b.WriteString(tag)
+				b.WriteString(dimStyle.Render(" ▎ "))
+			} else {
+				b.WriteString("     " + dimStyle.Render("▎ "))
+			}
+			b.WriteString(style.Render(line))
+			b.WriteString("\n")
+		}
+		b.WriteString("\n")
+	}
+
+	for _, msg := range m.chatMessages {
+		renderTurn(msg.Role, msg.Content)
+	}
+	if m.chatStreaming || m.chatCurrentResponse != "" {
+		live := m.chatCurrentResponse
+		if m.chatStreaming {
+			frames := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+			live += " " + frames[m.animationFrame%len(frames)]
+		}
+		renderTurn("assistant", live)
+	}
+	if m.chatError != "" {
+		b.WriteString(" ")
+		b.WriteString(errStyle.Render("error: " + m.chatError))
+		b.WriteString("\n\n")
+	}
+
+	// Input row at the bottom
+	cursor := "▌"
+	if m.animationFrame%2 == 1 {
+		cursor = " "
+	}
+	inputBox := m.chatInput
+	if inputBox == "" {
+		inputBox = dimStyle.Render("type a message and press ENTER…")
+	} else {
+		inputBox = normalStyle.Render(inputBox)
+	}
+	b.WriteString(lineStyle.Render(strings.Repeat("─", m.width-2)))
+	b.WriteString("\n ")
+	if m.chatStreaming {
+		b.WriteString(dimStyle.Render("(generating — wait or ESC to cancel)"))
+	} else {
+		b.WriteString(brightStyle.Render("> "))
+		b.WriteString(inputBox)
+		b.WriteString(brightStyle.Render(cursor))
+	}
+	b.WriteString("\n")
+
+	return b.String()
+}
+
+// wrapLines splits s into lines no wider than w runes (rough — counts bytes,
+// good enough for monospace ASCII; multibyte glyphs may visually overflow).
+func wrapLines(s string, w int) []string {
+	if w < 10 {
+		w = 10
+	}
+	var out []string
+	for _, raw := range strings.Split(s, "\n") {
+		for len(raw) > w {
+			cut := w
+			// Try to break on a space within the last quarter of the window.
+			for i := w - 1; i > w*3/4; i-- {
+				if raw[i] == ' ' {
+					cut = i
+					break
+				}
+			}
+			out = append(out, raw[:cut])
+			raw = strings.TrimLeft(raw[cut:], " ")
+		}
+		out = append(out, raw)
+	}
+	if len(out) == 0 {
+		return []string{""}
+	}
+	return out
+}
+
+// renderModelsAPIPanel renders the DMR connection info — base URL,
+// selected model ref, and a copy-pasteable curl example. Rendered below
+// the model table so the action bar still sits at the bottom.
+//
+// Value text uses the terminal's default foreground + bold (no explicit
+// color) so it stays readable regardless of which palette is loaded —
+// otherwise ColorBright collapses to near-white on a light terminal.
+func (m *Model) renderModelsAPIPanel() string {
+	dimStyle := lipgloss.NewStyle().Foreground(components.ColorDim)
+	keyStyle := lipgloss.NewStyle().Foreground(components.ColorDim)
+	valStyle := lipgloss.NewStyle().Bold(true)
+	codeStyle := lipgloss.NewStyle()
+	lineStyle := lipgloss.NewStyle().Foreground(components.ColorBorder)
+
+	endpoint := m.dmr.ChatEndpoint()
+	modelRef := m.currentModelRef()
+	if modelRef == "" {
+		modelRef = "(select a model)"
+	}
+	curl := m.currentCurlExample()
+
+	var b strings.Builder
+	b.WriteString(lineStyle.Render(strings.Repeat("─", m.width-2)))
+	b.WriteString("\n")
+	b.WriteString(" ")
+	b.WriteString(keyStyle.Render("API:   "))
+	b.WriteString(valStyle.Render(endpoint))
+	b.WriteString("  ")
+	b.WriteString(dimStyle.Render("(OpenAI-compatible)"))
+	b.WriteString("\n ")
+	b.WriteString(keyStyle.Render("Model: "))
+	b.WriteString(valStyle.Render(modelRef))
+	b.WriteString("\n ")
+	b.WriteString(keyStyle.Render("curl:  "))
+	// Truncate curl to terminal width so it doesn't blow up the layout.
+	// Reserve a few extra cols for the trailing "(Y to copy)" hint.
+	maxCurl := m.width - 22
+	if maxCurl < 30 {
+		maxCurl = 30
+	}
+	if len(curl) > maxCurl {
+		curl = curl[:maxCurl-1] + "…"
+	}
+	b.WriteString(codeStyle.Render(curl))
+	b.WriteString("  ")
+	b.WriteString(dimStyle.Render("(Y to copy)"))
+	b.WriteString("\n")
+	return b.String()
+}
+
+// renderTagPicker renders the intermediate "choose a variant" screen
+// shown after the user picks a model repo from search results. Lists the
+// available tags with parsed parameters / quantization / size.
+func (m *Model) renderTagPicker() string {
+	var b strings.Builder
+
+	titleStyle := lipgloss.NewStyle().Bold(true)
+	helpStyle := lipgloss.NewStyle().Foreground(components.ColorNormal)
+	lineStyle := lipgloss.NewStyle().Foreground(components.ColorBorder)
+	dimStyle := lipgloss.NewStyle().Foreground(components.ColorDim)
+	normalStyle := lipgloss.NewStyle().Foreground(components.ColorNormal)
+	selectedStyle := lipgloss.NewStyle().
+		Background(components.ColorSelectedBg).
+		Foreground(components.ColorSelectedFg).
+		Bold(true)
+	errStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#FF4444"))
+
+	header := "Choose a variant — " + m.tagPickerRepo
+	right := "[↑↓] Move  [ENTER] Pull this tag  [ESC] Back"
+	spacing := strings.Repeat(" ", max(1, m.width-len(header)-len(right)-4))
+	b.WriteString(titleStyle.Render(header))
+	b.WriteString(spacing)
+	b.WriteString(helpStyle.Render(right))
+	b.WriteString("\n")
+	b.WriteString(lineStyle.Render(strings.Repeat("─", m.width-2)))
+	b.WriteString("\n")
+
+	if m.tagPickerLoading {
+		b.WriteString("\n ")
+		frames := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+		b.WriteString(dimStyle.Render(frames[m.animationFrame%len(frames)] + " Loading tags…"))
+		b.WriteString("\n")
+		return b.String()
+	}
+	if m.tagPickerError != "" {
+		b.WriteString("\n ")
+		b.WriteString(errStyle.Render(m.tagPickerError))
+		b.WriteString("\n")
+		return b.String()
+	}
+	if len(m.tagPickerTags) == 0 {
+		b.WriteString("\n ")
+		b.WriteString(dimStyle.Render("No tags available."))
+		b.WriteString("\n")
+		return b.String()
+	}
+
+	// Layout: TAG (fill) | PARAMS (6) | QUANT (10) | SIZE (10) | UPDATED (12)
+	totalW := m.width - 6
+	paramW, quantW, sizeW, updW := 6, 10, 10, 12
+	tagW := totalW - paramW - quantW - sizeW - updW - 8
+	if tagW < 20 {
+		tagW = 20
+	}
+
+	header2 := " " + padRightStr("TAG", tagW) + "  " +
+		padRightStr("PARAMS", paramW) + "  " +
+		padRightStr("QUANT", quantW) + "  " +
+		padRightStr("SIZE", sizeW) + "  " +
+		padRightStr("UPDATED", updW)
+	b.WriteString(dimStyle.Render(header2))
+	b.WriteString("\n")
+
+	visible := m.tagPickerViewportHeight()
+	start := m.tagPickerScroll
+	end := start + visible
+	if end > len(m.tagPickerTags) {
+		end = len(m.tagPickerTags)
+	}
+
+	for i := start; i < end; i++ {
+		t := m.tagPickerTags[i]
+		row := " " + padRightStr(truncateWithEllipsis(t.Tag, tagW), tagW) + "  " +
+			padRightStr(defaultStr(t.Parameters, "--"), paramW) + "  " +
+			padRightStr(defaultStr(t.Quant, "--"), quantW) + "  " +
+			padRightStr(defaultStr(t.Size, "--"), sizeW) + "  " +
+			padRightStr(defaultStr(t.Updated, "--"), updW)
+		if i == m.tagPickerIndex {
+			b.WriteString(selectedStyle.Render(row))
+		} else {
+			b.WriteString(normalStyle.Render(row))
+		}
+		b.WriteString("\n")
+	}
+
+	if len(m.tagPickerTags) > visible {
+		b.WriteString("\n ")
+		b.WriteString(dimStyle.Render(fmt.Sprintf("Showing %d-%d of %d",
+			start+1, end, len(m.tagPickerTags))))
+	}
+	return b.String()
+}
+
+// currentModelRef returns the highlighted model's repo:tag, or "" if none.
+func (m *Model) currentModelRef() string {
+	if m.selectedRow >= len(m.models) {
+		return ""
+	}
+	return m.models[m.selectedRow].Repository + ":" + m.models[m.selectedRow].Tag
+}
+
+// currentCurlExample builds the curl snippet shown in the API panel /
+// copied to the clipboard via Y.
+func (m *Model) currentCurlExample() string {
+	ref := m.currentModelRef()
+	if ref == "" {
+		ref = "<model>"
+	}
+	return "curl -s " + m.dmr.ChatEndpoint() +
+		" -H 'Content-Type: application/json'" +
+		" -d '{\"model\":\"" + ref + "\",\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}]}'"
 }

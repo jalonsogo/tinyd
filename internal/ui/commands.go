@@ -1,7 +1,9 @@
 package ui
 
 import (
+	"context"
 	"os/exec"
+	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -404,13 +406,32 @@ func (m *Model) pullModelCmd(ref string) tea.Cmd {
 
 // runModelCmd opens an interactive chat REPL via `docker model run <ref>`.
 // Suspends the TUI for the duration of the chat (same pattern as exec).
+//
+// Wraps the command in a shell so a failure pauses for an ENTER keypress
+// before tinyd reclaims the alt-screen — otherwise the error message
+// flashes for a fraction of a second and the user just sees a blink.
+// Strips the `docker.io/` prefix because the CLI expects the short form.
 func (m *Model) runModelCmd(ref string) tea.Cmd {
-	c := exec.Command("docker", "model", "run", ref)
+	if _, err := exec.LookPath("docker"); err != nil {
+		return func() tea.Msg {
+			return types.ActionErrorMsg("docker binary not found in PATH")
+		}
+	}
+	ref = strings.TrimPrefix(ref, "docker.io/")
+
+	// Quote-escape the ref so it's safe inside the single-quoted shell
+	// argument below. Single quotes in refs are vanishingly rare but the
+	// escape is cheap insurance.
+	safeRef := strings.ReplaceAll(ref, "'", `'"'"'`)
+	script := "docker model run '" + safeRef + "'; ec=$?; " +
+		"if [ $ec -ne 0 ]; then echo; echo \"[docker model run exited with code $ec — press ENTER to return to tinyd]\"; read _; fi"
+
+	c := exec.Command("sh", "-c", script)
 	return tea.ExecProcess(c, func(err error) tea.Msg {
 		if err != nil {
-			return types.ActionErrorMsg("Failed to run model: " + err.Error())
+			return types.ActionErrorMsg("docker model run " + ref + ": " + err.Error())
 		}
-		return nil
+		return types.ActionSuccessMsg("Exited model REPL")
 	})
 }
 
@@ -431,4 +452,106 @@ func (m *Model) execContainerCmd(containerID string) tea.Cmd {
 		}
 		return nil
 	})
+}
+
+// startChatCmd opens a streaming chat request to DMR and returns a
+// ChatStartedMsg carrying the SSE reader. Subsequent token reads are
+// scheduled by the Update handler via readChatChunkCmd.
+//
+// We deliberately don't cancel the ctx when the request returns — the
+// reader is still active and the user closes it (via ESC or end-of-stream)
+// through closeChatStream on the model. The ctx is bounded by a 10-minute
+// hard ceiling so a stuck stream eventually unwinds.
+func (m *Model) startChatCmd(ref string, messages []types.ChatMessage) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		res, err := m.dmr.ChatStream(ctx, ref, messages)
+		if err != nil {
+			cancel()
+			return types.ChatTokenMsg{Done: true, Err: err.Error()}
+		}
+		// Tie the ctx cancel to the response body close so the stream
+		// shuts down cleanly when the UI calls closeChatStream.
+		res.Body = &cancelOnClose{Closer: res.Body, cancel: cancel}
+		return types.ChatStartedMsg{Reader: res.Reader, Body: res.Body}
+	}
+}
+
+// cancelOnClose pairs an io.Closer with a context cancel, so closing the
+// body also cancels the request context.
+type cancelOnClose struct {
+	Closer interface{ Close() error }
+	cancel context.CancelFunc
+}
+
+func (c *cancelOnClose) Close() error {
+	if c.cancel != nil {
+		c.cancel()
+	}
+	return c.Closer.Close()
+}
+
+// readChatChunkCmd reads one SSE chunk from the active chat reader. It is
+// re-scheduled by the Update handler after each non-terminal token until
+// Done becomes true.
+func (m *Model) readChatChunkCmd() tea.Cmd {
+	reader := m.chatReader
+	return func() tea.Msg {
+		if reader == nil {
+			return types.ChatTokenMsg{Done: true, Err: "chat reader is nil"}
+		}
+		token, done, err := dmr.NextChatToken(reader)
+		if err != nil {
+			return types.ChatTokenMsg{Done: true, Err: err.Error()}
+		}
+		return types.ChatTokenMsg{Token: token, Done: done}
+	}
+}
+
+// fetchModelTagsCmd retrieves the tag list for a Hub model repo. Sent to
+// the Update loop as a ModelTagsMsg.
+func (m *Model) fetchModelTagsCmd(repo string) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := m.dmr.WithCustomTimeout(dmr.TimeoutMedium)
+		defer cancel()
+		tags, err := m.dmr.FetchModelTags(ctx, repo)
+		if err != nil {
+			return types.ActionErrorMsg("Failed to load tags: " + err.Error())
+		}
+		return types.ModelTagsMsg{Repo: repo, Tags: tags}
+	}
+}
+
+// copyToClipboardCmd pipes text to the OS clipboard. Uses pbcopy (macOS),
+// wl-copy / xclip / xsel (Linux), or clip.exe (Windows / WSL). Surfaces a
+// clear status message either way.
+func (m *Model) copyToClipboardCmd(text, label string) tea.Cmd {
+	return func() tea.Msg {
+		candidates := [][]string{
+			{"pbcopy"},
+			{"wl-copy"},
+			{"xclip", "-selection", "clipboard"},
+			{"xsel", "--clipboard", "--input"},
+			{"clip.exe"},
+		}
+		for _, args := range candidates {
+			if _, err := exec.LookPath(args[0]); err != nil {
+				continue
+			}
+			cmd := exec.Command(args[0], args[1:]...)
+			stdin, err := cmd.StdinPipe()
+			if err != nil {
+				continue
+			}
+			if err := cmd.Start(); err != nil {
+				continue
+			}
+			_, _ = stdin.Write([]byte(text))
+			stdin.Close()
+			if err := cmd.Wait(); err == nil {
+				return types.ActionSuccessMsg(label + " copied to clipboard")
+			}
+		}
+		return types.ActionErrorMsg("no clipboard tool found (install pbcopy, wl-copy, xclip, xsel, or clip.exe)")
+	}
 }

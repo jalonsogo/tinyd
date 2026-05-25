@@ -43,7 +43,12 @@ func InitTheme(dark bool) {
 		ColorActiveBorder = lipgloss.Color("#DDDDDD")
 		ColorHighlight = lipgloss.Color("#00CCFF")
 		ColorEmpty = lipgloss.Color("#3A3A3A")
-		ColorSelectedBg = lipgloss.Color("#1D4ED8")
+		// Dark mode uses slate-500 — needs to be visibly lighter than the
+		// dark terminal background; slate-700 (the light-mode pick) was
+		// too close to the bg and the selection barely registered.
+		// Desaturated either way to avoid the red-on-blue chromatic
+		// fringing the saturated blue caused.
+		ColorSelectedBg = lipgloss.Color("#64748B")
 		ColorSelectedFg = lipgloss.Color("#FFFFFF")
 	} else {
 		// Light mode: high-contrast dark-on-white palette
@@ -55,7 +60,7 @@ func InitTheme(dark bool) {
 		ColorActiveBorder = lipgloss.Color("#000000")
 		ColorHighlight = lipgloss.Color("#005588") // dark teal
 		ColorEmpty = lipgloss.Color("#BBBBBB")
-		ColorSelectedBg = lipgloss.Color("#1D4ED8") // blue bg — always pops
+		ColorSelectedBg = lipgloss.Color("#334155") // slate, desaturated
 		ColorSelectedFg = lipgloss.Color("#FFFFFF")
 	}
 }
@@ -115,17 +120,16 @@ func (t TabsComponent) SetActiveTab(index int) TabsComponent {
 func (t TabsComponent) View() string {
 	var b strings.Builder
 
-	// In light mode we swap active/inactive text colors so the active tab
-	// label stands out (the dark palette would otherwise render it near-
-	// invisible). Borders follow the standard convention: active = darker
-	// (ColorActiveBorder), inactive = lighter (ColorBorder).
-	activeText, inactiveText := ColorBright, ColorDim
-	if !DarkBackground {
-		activeText, inactiveText = ColorDim, ColorBright
-	}
+	// Active tab text and border use the terminal's default foreground
+	// + bold (no explicit color) so they stay readable on both light and
+	// dark terminals, even when palette detection guessed wrong.
+	// Inactive elements use ColorDim / ColorBorder, which are the same
+	// medium-gray hex value in both palettes — visible on either bg.
+	activeText := lipgloss.NewStyle().Bold(true)
+	inactiveText := lipgloss.NewStyle().Foreground(ColorDim)
 
 	borderStyle := lipgloss.NewStyle().Foreground(ColorBorder)
-	activeBorderStyle := lipgloss.NewStyle().Foreground(ColorActiveBorder).Bold(true)
+	activeBorderStyle := lipgloss.NewStyle().Bold(true)
 
 	// Top row with rounded corners
 	b.WriteString(" ")
@@ -147,14 +151,12 @@ func (t TabsComponent) View() string {
 	for i, tab := range t.tabs {
 		tabText := fmt.Sprintf(" %s ", tab.Name)
 		bStyle := borderStyle
+		textStyle := inactiveText
 		if i == t.activeTab {
 			bStyle = activeBorderStyle
+			textStyle = activeText
 		}
 		b.WriteString(bStyle.Render("│"))
-		textStyle := lipgloss.NewStyle().Foreground(inactiveText)
-		if i == t.activeTab {
-			textStyle = lipgloss.NewStyle().Foreground(activeText).Bold(true)
-		}
 		b.WriteString(textStyle.Render(tabText))
 		b.WriteString(bStyle.Render("│"))
 	}
@@ -266,7 +268,10 @@ func (t TableComponent) SetVisibleRange(start, end int) TableComponent {
 func (t TableComponent) View() string {
 	var b strings.Builder
 
-	headerStyle := lipgloss.NewStyle().Foreground(ColorHeader).Bold(true)
+	// Headers use bold + terminal default foreground so they stay readable
+	// on either palette without relying on ColorHeader (which collapses to
+	// near-white on a light terminal under the dark palette).
+	headerStyle := lipgloss.NewStyle().Bold(true)
 	normalCellStyle := lipgloss.NewStyle().Foreground(ColorNormal)
 	selectedCellStyle := lipgloss.NewStyle().
 		Background(ColorSelectedBg).

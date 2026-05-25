@@ -4,6 +4,13 @@ All notable changes to tinyd will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.3.1](https://github.com/jalonsogo/tinyd/compare/v0.3.0...v0.3.1) (2026-05-25)
+
+
+### Bug Fixes
+
+* resolve compile errors blocking v0.3.0 binary release ([#7](https://github.com/jalonsogo/tinyd/issues/7)) ([35a59b3](https://github.com/jalonsogo/tinyd/commit/35a59b3f5ac3040076fff896b151ef0a3cc50475))
+
 ## [0.3.0](https://github.com/jalonsogo/tinyd/compare/v0.2.0...v0.3.0) (2026-05-25)
 
 

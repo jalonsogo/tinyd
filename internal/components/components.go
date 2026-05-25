@@ -115,8 +115,20 @@ func (t TabsComponent) SetActiveTab(index int) TabsComponent {
 func (t TabsComponent) View() string {
 	var b strings.Builder
 
-	borderStyle := lipgloss.NewStyle().Foreground(ColorBorder)
-	activeBorderStyle := lipgloss.NewStyle().Foreground(ColorActiveBorder).Bold(true)
+	// In light mode we swap active/inactive coloring: the bright (black) and
+	// active-border (black) tokens become inactive, while dim/border become
+	// active. This makes the selected tab clearly stand out on a white
+	// background even when the dark palette would render active text near-
+	// invisible.
+	activeText, inactiveText := ColorBright, ColorDim
+	activeBorder, inactiveBorder := ColorActiveBorder, ColorBorder
+	if !DarkBackground {
+		activeText, inactiveText = ColorDim, ColorBright
+		activeBorder, inactiveBorder = ColorBorder, ColorActiveBorder
+	}
+
+	borderStyle := lipgloss.NewStyle().Foreground(inactiveBorder)
+	activeBorderStyle := lipgloss.NewStyle().Foreground(activeBorder).Bold(true)
 
 	// Top row with rounded corners
 	b.WriteString(" ")
@@ -142,9 +154,9 @@ func (t TabsComponent) View() string {
 			bStyle = activeBorderStyle
 		}
 		b.WriteString(bStyle.Render("│"))
-		textStyle := lipgloss.NewStyle().Foreground(ColorDim)
+		textStyle := lipgloss.NewStyle().Foreground(inactiveText)
 		if i == t.activeTab {
-			textStyle = lipgloss.NewStyle().Foreground(ColorBright).Bold(true)
+			textStyle = lipgloss.NewStyle().Foreground(activeText).Bold(true)
 		}
 		b.WriteString(textStyle.Render(tabText))
 		b.WriteString(bStyle.Render("│"))

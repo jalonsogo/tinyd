@@ -14,6 +14,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- **Customizable visible columns** — new `V` key opens a column-picker overlay on top of any tab listing the togglable columns with a `[x]` / `[ ]` checkbox each. ↑/↓ moves the cursor, Space/Enter toggles, V/ESC closes. Changes apply immediately and last for the session.
+- **`TINYD_HIDE_COLS` env var** seeds the initial hidden-column set at startup (comma-separated lowercase keys: `status,cpu,mem,ports,image,size,created,params,quant,driver,containers,mountpoint,scope,ipv4`). Default is `status` — the colored dot already encodes that signal so the textual STATUS column is redundant for most users. Set `TINYD_HIDE_COLS=-` (or `none`) to show everything.
+- **Copy curl to clipboard** — `Y` on the Models tab yanks the example `curl` command for the selected model to the system clipboard. Uses `pbcopy` (macOS), `wl-copy` / `xclip` / `xsel` (Linux), or `clip.exe` (Windows/WSL).
 - **Interactive Run-image modal** — `R` on the Images tab opens a full-screen form for `name`, port mappings (`host:container`), env vars (`KEY=value`), and volumes. Volume entries support three sources via a sub-picker:
   - **Existing volume** picked from the Volumes tab
   - **New named volume** (name + container path)
@@ -32,6 +35,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **Substring search in logs** — `S` in the logs view activates a case-insensitive filter.
 
 ### Changed
+- **Selection background is now palette-aware violet** — was a saturated `#1D4ED8` blue that fringed against red status text (ERROR / STOPPED). Dark mode uses `#7C3AED` (violet-600) with white text; light mode flips to pale lavender (`#E9D5FF`) with dark-violet text (`#5B21B6`), which sits naturally on a white terminal instead of feeling like a heavy block.
+- **Status text on selected rows** drops the per-status color (red / yellow / etc.) and uses `ColorSelectedFg` so the highlight stays clean. The colored status dot still carries the at-a-glance state.
+- **Brighter body text in dark mode** — `ColorNormal` bumped `#AAAAAA` → `#DDDDDD` for higher contrast against dark backgrounds. Light mode stays at `#222222`.
+- **`docker model run` wrapped in `sh -c`** so a failed launch (model not found, DMR disabled, etc.) pauses for ENTER before tinyd reclaims the alt-screen — previously the error message flashed for a fraction of a second and the user just saw a blink. Also strips the `docker.io/` prefix the CLI doesn't accept.
 - **Chat key is `C`, REPL is `R` / `Shift+R`** on the Models tab — the in-app streaming chat lives on `C`; plain `R` (and `Shift+R`) drops to the shell `docker model run` REPL for muscle memory.
 - **`R` opens the Run modal on Images** (was `S` "Start"). Shortcut bar shows `Run` with `R` underlined.
 - **Pull-image shortcut visually separated** from per-image operations: `R Run  U pdate to latest  I nspect  D elete │ P ull image`.

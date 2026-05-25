@@ -47,6 +47,7 @@
 - Smart status indicators (green dots for active, gray for inactive, yellow for dangling)
 - Intelligent scrolling for large resource lists
 - Box-drawing characters for crisp borders
+- **Customizable columns** — press `V` on any tab to toggle which columns are visible, or seed the default set with `TINYD_HIDE_COLS=status,size,...`
 
 ## 🚀 Quick Start
 
@@ -177,6 +178,7 @@ Network topology at a glance:
 |-----|--------|
 | `i` | Inspect selected resource |
 | `d` | Delete selected resource (inline Yes/No confirmation) |
+| `v` | Toggle the column-picker overlay (per-tab) |
 | `?` / `Shift+H` | Toggle help overlay |
 | `ESC` | Close overlay / return to list / cancel modal |
 | `Enter` | Refresh / confirm |
@@ -195,6 +197,7 @@ Network topology at a glance:
 | `c` | Models | Chat in-app (streaming) |
 | `r` / `Shift+R` | Models | Drop to `docker model run` REPL |
 | `p` | Models | Pull model — opens variant picker (tag / params / quant / size) |
+| `y` | Models | Yank curl example to clipboard |
 
 ## 🎯 Use Cases
 
@@ -238,6 +241,15 @@ TINYD_THEME=light ./tinyd   # or dark
 ```bash
 DMR_BASE_URL=http://my-host:12434 ./tinyd
 ```
+
+**Hide columns by default**:
+```bash
+# Hide STATUS (the default if unset) and SIZE on every applicable tab
+TINYD_HIDE_COLS=status,size ./tinyd
+# Or show everything
+TINYD_HIDE_COLS=- ./tinyd
+```
+Recognised keys: `status`, `cpu`, `mem`, `ports`, `image`, `size`, `created`, `params`, `quant`, `driver`, `containers`, `mountpoint`, `scope`, `ipv4`. Press `V` inside the app to toggle per-tab without restarting.
 
 ## 📚 Documentation
 

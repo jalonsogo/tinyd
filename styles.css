@@ -115,7 +115,6 @@ code, pre, kbd { font-family: var(--mono); }
 .brand-cursor {
   display: inline-block;
   color: var(--green);
-  animation: blink 1.05s steps(1) infinite;
   margin-left: 2px;
 }
 @keyframes blink { 50% { opacity: 0; } }
@@ -531,9 +530,12 @@ main { display: block; }
 /* ---------- features ---------- */
 .feature-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 16px;
 }
+.feature-grid > .feature { grid-column: span 2; }
+.feature-grid > .feature.feature-row-2 { grid-column: span 3; }
+.feature-grid > .feature.feature-wide { grid-column: 1 / -1; }
 .feature {
   position: relative;
   background: linear-gradient(180deg, var(--bg-2), var(--bg-1));
@@ -648,6 +650,50 @@ kbd {
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
+/* box icon (containers) */
+.icon-box { position: relative; }
+.icon-box .box-outer {
+  position: absolute;
+  top: 11px; left: 9px;
+  width: 26px; height: 22px;
+  border: 1.5px solid var(--green);
+  border-radius: 3px;
+  box-shadow: 0 0 8px rgba(74, 222, 128, 0.25);
+}
+.icon-box .box-seam {
+  position: absolute;
+  top: 21px; left: 9px;
+  width: 26px; height: 1.5px;
+  background: var(--green);
+  opacity: 0.55;
+}
+.icon-box .box-handle {
+  position: absolute;
+  top: 7px; left: 18px;
+  width: 8px; height: 4px;
+  background: var(--green);
+  border-radius: 2px 2px 0 0;
+  opacity: 0.85;
+}
+
+/* folder icon (volumes) */
+.icon-folder { position: relative; }
+.icon-folder .folder-tab {
+  position: absolute;
+  top: 10px; left: 9px;
+  width: 12px; height: 4px;
+  background: var(--cyan);
+  border-radius: 2px 2px 0 0;
+}
+.icon-folder .folder-body {
+  position: absolute;
+  top: 13px; left: 9px;
+  width: 26px; height: 19px;
+  border: 1.5px solid var(--cyan);
+  border-radius: 0 3px 3px 3px;
+  box-shadow: 0 0 8px rgba(56, 189, 248, 0.25);
+}
+
 .icon-net { position: relative; }
 .icon-net .node {
   position: absolute;
@@ -667,11 +713,57 @@ kbd {
 .icon-net .line.l1 { top: 13px; left: 12px; width: 20px; }
 .icon-net .line.l2 { top: 15px; left: 13px; width: 16px; transform: rotate(60deg); }
 
+.icon-models { position: relative; }
+.icon-models .pulse {
+  position: absolute;
+  top: 50%; left: 50%;
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  background: var(--magenta);
+  box-shadow: 0 0 8px rgba(192, 132, 252, 0.6);
+  transform: translate(-50%, -50%);
+  animation: model-pulse 2.4s ease-out infinite;
+}
+.icon-models .pulse-2 {
+  width: 22px; height: 22px;
+  background: transparent;
+  border: 1px solid rgba(192, 132, 252, 0.6);
+  box-shadow: none;
+  animation-delay: -0.8s;
+}
+.icon-models .pulse-3 {
+  width: 34px; height: 34px;
+  background: transparent;
+  border: 1px solid rgba(192, 132, 252, 0.35);
+  box-shadow: none;
+  animation-delay: -1.6s;
+}
+@keyframes model-pulse {
+  0%   { opacity: 0.9; transform: translate(-50%, -50%) scale(0.6); }
+  60%  { opacity: 0.25; }
+  100% { opacity: 0; transform: translate(-50%, -50%) scale(1.2); }
+}
+
+.badge-new {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 7px;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--bg-1);
+  background: var(--magenta);
+  border-radius: 4px;
+  vertical-align: middle;
+}
+
 /* wide feature */
 .feature-wide {
   grid-column: 1 / -1;
   min-height: auto;
   padding: 28px;
+  margin-top: 32px;
 }
 .feature-wide h3 {
   font-family: var(--sans);
@@ -927,7 +1019,7 @@ kbd {
 /* ---------- keys ---------- */
 .keys-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 16px;
 }
 .keys-col {
@@ -1098,6 +1190,8 @@ kbd {
   .hero-inner { grid-template-columns: 1fr; gap: 40px; }
   .hero-mascot { width: 96px; height: 96px; bottom: -12px; right: 4px; padding: 14px; }
   .feature-grid { grid-template-columns: repeat(2, 1fr); }
+  .feature-grid > .feature,
+  .feature-grid > .feature.feature-row-2 { grid-column: span 1; }
   .install-grid { grid-template-columns: 1fr; }
   .keys-grid { grid-template-columns: repeat(2, 1fr); }
   .who-card { grid-template-columns: 1fr; padding: 32px; gap: 32px; }

@@ -453,6 +453,12 @@ func (m *Model) handleListViewKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case "u", "U":
+		if m.activeTab == types.TabImages {
+			return m.handleImageUpdate()
+		}
+		return m, nil
+
 	default:
 		return m, nil
 	}
@@ -688,6 +694,28 @@ func (m *Model) handleImageDelete() (tea.Model, tea.Cmd) {
 	m.deleteConfirmMode = !m.deleteConfirmMode
 	m.deleteConfirmOption = 1 // Default to "No"
 	return m, nil
+}
+
+// handleImageUpdate re-pulls the selected image's repo:tag to update it to
+// the latest version published under that tag. No Hub search — just a fresh
+// pull of what's already there.
+func (m *Model) handleImageUpdate() (tea.Model, tea.Cmd) {
+	if m.selectedRow >= len(m.images) {
+		return m, nil
+	}
+	image := m.images[m.selectedRow]
+	// Dangling images have <none>:<none> — no ref to pull.
+	if image.Dangling || image.Repository == "" || image.Repository == "<none>" {
+		m.statusMessage = "Can't update an untagged image"
+		return m, nil
+	}
+	ref := image.Repository
+	if image.Tag != "" && image.Tag != "<none>" {
+		ref = image.Repository + ":" + image.Tag
+	}
+	m.actionLabel = "Updating " + ref
+	m.statusMessage = "Updating " + ref + " to latest..."
+	return m, m.updateImageCmd(ref)
 }
 
 // --- Model handlers (Docker Model Runner) ---

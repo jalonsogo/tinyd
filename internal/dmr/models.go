@@ -65,15 +65,15 @@ func (c *Client) FetchModels(ctx context.Context) ([]types.Model, error) {
 	return nil, fmt.Errorf("unexpected /models payload: %s", truncate(string(body), 120))
 }
 
-// InspectModel returns the raw JSON for a model (repo[:tag]).
+// InspectModel returns the raw JSON for a model (repo[:tag]). Use the full
+// ref as a single tail segment (colon preserved) — see DeleteModel.
 func (c *Client) InspectModel(ctx context.Context, ref string) (string, error) {
 	if ctx == nil {
 		var cancel context.CancelFunc
 		ctx, cancel = c.WithTimeout()
 		defer cancel()
 	}
-	ns, name := splitRef(ref)
-	body, err := c.get(ctx, "/models/"+ns+"/"+name)
+	body, err := c.get(ctx, "/models/"+ref)
 	if err != nil {
 		return "", err
 	}
@@ -88,15 +88,19 @@ func (c *Client) InspectModel(ctx context.Context, ref string) (string, error) {
 }
 
 // DeleteModel removes a local model by ref (repo[:tag]).
+//
+// DMR expects the full ref as a single tail segment with the colon
+// preserved — e.g. /models/ai/qwen2.5-coder:7b-instruct-q4_K_M — not
+// /models/ai/qwen2.5-coder/7b-instruct-q4_K_M (which is what splitRef
+// would produce). Use ref verbatim.
 func (c *Client) DeleteModel(ctx context.Context, ref string) error {
 	if ctx == nil {
 		var cancel context.CancelFunc
 		ctx, cancel = c.WithCustomTimeout(TimeoutMedium)
 		defer cancel()
 	}
-	ns, name := splitRef(ref)
 	req, err := http.NewRequestWithContext(ctx, http.MethodDelete,
-		c.baseURL+"/models/"+ns+"/"+name, nil)
+		c.baseURL+"/models/"+ref, nil)
 	if err != nil {
 		return err
 	}

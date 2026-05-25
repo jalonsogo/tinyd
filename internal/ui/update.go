@@ -1,6 +1,9 @@
 package ui
 
 import (
+	"os"
+	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -265,6 +268,12 @@ func (m *Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleInspectViewKeys(msg)
 	case types.ViewModePullImage, types.ViewModePullModel:
 		return m.handlePullViewKeys(msg)
+	case types.ViewModeRunImage:
+		return m.handleRunModalKeys(msg)
+	case types.ViewModeRunVolumePicker:
+		return m.handleVolumePickerKeys(msg)
+	case types.ViewModeRunFileBrowser:
+		return m.handleFileBrowserKeys(msg)
 	default:
 		return m, nil
 	}
@@ -392,8 +401,6 @@ func (m *Model) handleListViewKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "s", "S":
 		if m.activeTab == types.TabContainers {
 			return m.handleContainerStartStop()
-		} else if m.activeTab == types.TabImages {
-			return m.handleImageStart()
 		}
 		return m, nil
 	case "l", "L":
@@ -447,6 +454,9 @@ func (m *Model) handleListViewKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "r", "R":
 		if m.activeTab == types.TabContainers {
 			return m.handleContainerRestart()
+		}
+		if m.activeTab == types.TabImages {
+			return m.handleImageStart()
 		}
 		if m.activeTab == types.TabModels {
 			return m.handleModelRun()
@@ -670,9 +680,18 @@ func (m *Model) handleImageStart() (tea.Model, tea.Cmd) {
 	image := m.images[m.selectedRow]
 	m.selectedImage = &image
 
-	// Start the image (create and run a container from it)
-	// For now, use simple defaults - can be expanded to a modal later
-	return m, m.runContainerCmd()
+	// Open the interactive Run modal — user fills in name/ports/volumes/env
+	// then Ctrl+R submits.
+	m.currentView = types.ViewModeRunImage
+	m.runContainerName = ""
+	m.runPorts = []types.PortMapping{}
+	m.runVolumes = []types.VolumeMapping{}
+	m.runEnvVars = []types.EnvVar{}
+	m.runPortInput = ""
+	m.runEnvInput = ""
+	m.runModalField = types.RunFieldName
+	m.statusMessage = ""
+	return m, nil
 }
 
 func (m *Model) handleImageInspect() (tea.Model, tea.Cmd) {
@@ -916,4 +935,445 @@ func (m *Model) handleNetworkDelete() (tea.Model, tea.Cmd) {
 	m.deleteConfirmMode = !m.deleteConfirmMode
 	m.deleteConfirmOption = 1 // Default to "No"
 	return m, nil
+}
+
+// --- Run image modal ---
+
+// handleRunModalKeys handles input in the Run image modal (full-screen form).
+// TAB/Shift-TAB cycles fields, Enter commits the current input row to its
+// list (or runs when on Submit), Ctrl+R runs from anywhere, Esc cancels.
+func (m *Model) handleRunModalKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	key := msg.String()
+
+	switch key {
+	case "esc":
+		m.currentView = types.ViewModeList
+		return m, nil
+	case "ctrl+r":
+		return m.submitRunModal()
+	case "tab", "down":
+		m.runModalField = (m.runModalField + 1) % types.RunFieldCount
+		return m, nil
+	case "shift+tab", "up":
+		m.runModalField = (m.runModalField + types.RunFieldCount - 1) % types.RunFieldCount
+		return m, nil
+	case "enter":
+		switch m.runModalField {
+		case types.RunFieldPortInput:
+			if p, ok := parsePortMapping(m.runPortInput); ok {
+				m.runPorts = append(m.runPorts, p)
+				m.runPortInput = ""
+			}
+			return m, nil
+		case types.RunFieldEnvInput:
+			if e, ok := parseEnvVar(m.runEnvInput); ok {
+				m.runEnvVars = append(m.runEnvVars, e)
+				m.runEnvInput = ""
+			}
+			return m, nil
+		case types.RunFieldVolumeAdd:
+			return m.openVolumePicker()
+		case types.RunFieldSubmit:
+			return m.submitRunModal()
+		}
+		return m, nil
+	case "backspace":
+		// On an empty input row, remove the last committed entry from the
+		// list above (shell-style line erase).
+		switch m.runModalField {
+		case types.RunFieldName:
+			if len(m.runContainerName) > 0 {
+				m.runContainerName = m.runContainerName[:len(m.runContainerName)-1]
+			}
+		case types.RunFieldPortInput:
+			if m.runPortInput == "" && len(m.runPorts) > 0 {
+				m.runPorts = m.runPorts[:len(m.runPorts)-1]
+			} else if len(m.runPortInput) > 0 {
+				m.runPortInput = m.runPortInput[:len(m.runPortInput)-1]
+			}
+		case types.RunFieldEnvInput:
+			if m.runEnvInput == "" && len(m.runEnvVars) > 0 {
+				m.runEnvVars = m.runEnvVars[:len(m.runEnvVars)-1]
+			} else if len(m.runEnvInput) > 0 {
+				m.runEnvInput = m.runEnvInput[:len(m.runEnvInput)-1]
+			}
+		case types.RunFieldVolumeAdd:
+			if len(m.runVolumes) > 0 {
+				m.runVolumes = m.runVolumes[:len(m.runVolumes)-1]
+			}
+		}
+		return m, nil
+	}
+
+	// Printable character → append to focused field's input.
+	if len(key) == 1 && key[0] >= 32 && key[0] < 127 {
+		switch m.runModalField {
+		case types.RunFieldName:
+			m.runContainerName += key
+		case types.RunFieldPortInput:
+			m.runPortInput += key
+		case types.RunFieldEnvInput:
+			m.runEnvInput += key
+		}
+	}
+	return m, nil
+}
+
+func (m *Model) submitRunModal() (tea.Model, tea.Cmd) {
+	// Commit any partially-typed input rows so users don't lose them.
+	if p, ok := parsePortMapping(m.runPortInput); ok {
+		m.runPorts = append(m.runPorts, p)
+		m.runPortInput = ""
+	}
+	if e, ok := parseEnvVar(m.runEnvInput); ok {
+		m.runEnvVars = append(m.runEnvVars, e)
+		m.runEnvInput = ""
+	}
+	m.currentView = types.ViewModeList
+	m.actionLabel = "Running " + m.selectedImage.Repository + ":" + m.selectedImage.Tag
+	m.statusMessage = "Starting container..."
+	return m, m.runContainerCmd()
+}
+
+// parsePortMapping parses "host:container" (e.g. "8080:80"). Both halves
+// must be present and non-empty; whitespace is trimmed.
+func parsePortMapping(s string) (types.PortMapping, bool) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return types.PortMapping{}, false
+	}
+	parts := strings.SplitN(s, ":", 2)
+	if len(parts) != 2 {
+		return types.PortMapping{}, false
+	}
+	host := strings.TrimSpace(parts[0])
+	cont := strings.TrimSpace(parts[1])
+	if host == "" || cont == "" {
+		return types.PortMapping{}, false
+	}
+	return types.PortMapping{Host: host, Container: cont}, true
+}
+
+// parseEnvVar parses "KEY=value". Value may be empty; key may not.
+func parseEnvVar(s string) (types.EnvVar, bool) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return types.EnvVar{}, false
+	}
+	parts := strings.SplitN(s, "=", 2)
+	if len(parts) < 1 || parts[0] == "" {
+		return types.EnvVar{}, false
+	}
+	value := ""
+	if len(parts) == 2 {
+		value = parts[1]
+	}
+	return types.EnvVar{Key: parts[0], Value: value}, true
+}
+
+// --- Volume picker (sub-view of Run modal) ---
+
+func (m *Model) openVolumePicker() (tea.Model, tea.Cmd) {
+	m.currentView = types.ViewModeRunVolumePicker
+	m.runVolumePickerMode = types.VolumePickerChoose
+	m.runVolumePickerIndex = 0
+	m.runVolumePickerSub = 0
+	m.runVolumeNameInput = ""
+	m.runVolumeHostInput = ""
+	m.runVolumeContInput = ""
+	return m, nil
+}
+
+func (m *Model) handleVolumePickerKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	key := msg.String()
+
+	if key == "esc" {
+		// Back to the Run modal — drop without committing.
+		m.currentView = types.ViewModeRunImage
+		return m, nil
+	}
+
+	switch m.runVolumePickerMode {
+	case types.VolumePickerChoose:
+		return m.handleVolumePickerChoose(key)
+	case types.VolumePickerExisting:
+		return m.handleVolumePickerExisting(key)
+	case types.VolumePickerNew:
+		return m.handleVolumePickerNew(key)
+	case types.VolumePickerBind:
+		// Bind mode is the "container path" step after picking a host
+		// path in the file browser.
+		return m.handleVolumePickerBind(key)
+	}
+	return m, nil
+}
+
+func (m *Model) handleVolumePickerChoose(key string) (tea.Model, tea.Cmd) {
+	options := 3 // existing / new / bind
+	switch key {
+	case "up", "k":
+		if m.runVolumePickerIndex > 0 {
+			m.runVolumePickerIndex--
+		}
+	case "down", "j":
+		if m.runVolumePickerIndex < options-1 {
+			m.runVolumePickerIndex++
+		}
+	case "enter":
+		switch m.runVolumePickerIndex {
+		case 0: // existing
+			m.runVolumePickerMode = types.VolumePickerExisting
+			m.runVolumePickerIndex = 0
+			m.runVolumePickerSub = 0 // start with focus on the volume list
+			m.runVolumeContInput = ""
+		case 1: // new
+			m.runVolumePickerMode = types.VolumePickerNew
+			m.runVolumePickerSub = 0 // start with focus on the name field
+			m.runVolumeNameInput = ""
+			m.runVolumeContInput = ""
+		case 2: // bind
+			return m.openFileBrowser()
+		}
+	}
+	return m, nil
+}
+
+// handleVolumePickerExisting drives a two-stage flow: first pick a volume
+// from the list (sub=0), then type the container mount path (sub=1). TAB
+// toggles focus, Enter on the list advances to the path step, Enter on the
+// path commits the mapping.
+func (m *Model) handleVolumePickerExisting(key string) (tea.Model, tea.Cmd) {
+	if len(m.volumes) == 0 {
+		if key == "enter" || key == "esc" {
+			m.runVolumePickerMode = types.VolumePickerChoose
+			m.runVolumePickerSub = 0
+		}
+		return m, nil
+	}
+
+	// Shared: TAB toggles between list and path field.
+	if key == "tab" || key == "shift+tab" {
+		m.runVolumePickerSub = 1 - m.runVolumePickerSub
+		return m, nil
+	}
+
+	if m.runVolumePickerSub == 0 {
+		// Stage 1: picking the volume.
+		switch key {
+		case "up", "k":
+			if m.runVolumePickerIndex > 0 {
+				m.runVolumePickerIndex--
+			}
+		case "down", "j":
+			if m.runVolumePickerIndex < len(m.volumes)-1 {
+				m.runVolumePickerIndex++
+			}
+		case "enter":
+			// Advance to path entry.
+			m.runVolumePickerSub = 1
+		}
+		return m, nil
+	}
+
+	// Stage 2: typing the container path.
+	switch key {
+	case "enter":
+		cont := strings.TrimSpace(m.runVolumeContInput)
+		if cont == "" {
+			return m, nil
+		}
+		v := m.volumes[m.runVolumePickerIndex]
+		m.runVolumes = append(m.runVolumes, types.VolumeMapping{
+			IsNamed:    true,
+			VolumeName: v.Name,
+			Container:  cont,
+		})
+		m.currentView = types.ViewModeRunImage
+		return m, nil
+	case "backspace":
+		if len(m.runVolumeContInput) > 0 {
+			m.runVolumeContInput = m.runVolumeContInput[:len(m.runVolumeContInput)-1]
+		}
+	default:
+		if len(key) == 1 && key[0] >= 32 && key[0] < 127 {
+			m.runVolumeContInput += key
+		}
+	}
+	return m, nil
+}
+
+func (m *Model) handleVolumePickerNew(key string) (tea.Model, tea.Cmd) {
+	// Two fields tracked by runVolumePickerSub: 0 = name, 1 = container path.
+	switch key {
+	case "tab", "shift+tab", "down", "up":
+		m.runVolumePickerSub = 1 - m.runVolumePickerSub
+	case "enter":
+		// On name field, Enter advances to path; on path field, Enter commits.
+		if m.runVolumePickerSub == 0 {
+			if strings.TrimSpace(m.runVolumeNameInput) == "" {
+				return m, nil
+			}
+			m.runVolumePickerSub = 1
+			return m, nil
+		}
+		name := strings.TrimSpace(m.runVolumeNameInput)
+		cont := strings.TrimSpace(m.runVolumeContInput)
+		if name == "" || cont == "" {
+			return m, nil
+		}
+		m.runVolumes = append(m.runVolumes, types.VolumeMapping{
+			IsNamed:    true,
+			VolumeName: name,
+			Container:  cont,
+		})
+		m.currentView = types.ViewModeRunImage
+		return m, nil
+	case "backspace":
+		if m.runVolumePickerSub == 0 && len(m.runVolumeNameInput) > 0 {
+			m.runVolumeNameInput = m.runVolumeNameInput[:len(m.runVolumeNameInput)-1]
+		} else if m.runVolumePickerSub == 1 && len(m.runVolumeContInput) > 0 {
+			m.runVolumeContInput = m.runVolumeContInput[:len(m.runVolumeContInput)-1]
+		}
+	default:
+		if len(key) == 1 && key[0] >= 32 && key[0] < 127 {
+			if m.runVolumePickerSub == 0 {
+				m.runVolumeNameInput += key
+			} else {
+				m.runVolumeContInput += key
+			}
+		}
+	}
+	return m, nil
+}
+
+// handleVolumePickerBind is the post-file-browser step: prompts for the
+// container path. The host path was set by the file browser into
+// runVolumeHostInput.
+func (m *Model) handleVolumePickerBind(key string) (tea.Model, tea.Cmd) {
+	switch key {
+	case "enter":
+		cont := strings.TrimSpace(m.runVolumeContInput)
+		if cont == "" {
+			return m, nil
+		}
+		m.runVolumes = append(m.runVolumes, types.VolumeMapping{
+			IsNamed:   false,
+			Host:      m.runVolumeHostInput,
+			Container: cont,
+		})
+		m.currentView = types.ViewModeRunImage
+		return m, nil
+	case "backspace":
+		if len(m.runVolumeContInput) > 0 {
+			m.runVolumeContInput = m.runVolumeContInput[:len(m.runVolumeContInput)-1]
+		}
+	default:
+		if len(key) == 1 && key[0] >= 32 && key[0] < 127 {
+			m.runVolumeContInput += key
+		}
+	}
+	return m, nil
+}
+
+// --- File browser (for bind mount host path) ---
+
+func (m *Model) openFileBrowser() (tea.Model, tea.Cmd) {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		home = "/"
+	}
+	m.fileBrowserPath = home
+	m.fileBrowserIndex = 0
+	m.fileBrowserScroll = 0
+	m.fileBrowserEntries = listDir(home)
+	m.currentView = types.ViewModeRunFileBrowser
+	return m, nil
+}
+
+func (m *Model) handleFileBrowserKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	key := msg.String()
+
+	switch key {
+	case "esc":
+		// Back to volume picker chooser.
+		m.currentView = types.ViewModeRunVolumePicker
+		m.runVolumePickerMode = types.VolumePickerChoose
+		return m, nil
+	case "f", "F":
+		// Confirm: use the *current directory* as the host path.
+		m.runVolumeHostInput = m.fileBrowserPath
+		m.runVolumePickerMode = types.VolumePickerBind
+		m.runVolumeContInput = ""
+		m.currentView = types.ViewModeRunVolumePicker
+		return m, nil
+	case "up", "k":
+		if m.fileBrowserIndex > 0 {
+			m.fileBrowserIndex--
+		}
+		return m, nil
+	case "down", "j":
+		if m.fileBrowserIndex < len(m.fileBrowserEntries)-1 {
+			m.fileBrowserIndex++
+		}
+		return m, nil
+	case "enter":
+		if len(m.fileBrowserEntries) == 0 {
+			return m, nil
+		}
+		entry := m.fileBrowserEntries[m.fileBrowserIndex]
+		// ".." → go up one level.
+		if entry == "../" {
+			m.fileBrowserPath = filepath.Dir(m.fileBrowserPath)
+			m.fileBrowserEntries = listDir(m.fileBrowserPath)
+			m.fileBrowserIndex = 0
+			m.fileBrowserScroll = 0
+			return m, nil
+		}
+		// Directory entries end in "/" — descend into them.
+		if strings.HasSuffix(entry, "/") {
+			child := filepath.Join(m.fileBrowserPath, strings.TrimSuffix(entry, "/"))
+			m.fileBrowserPath = child
+			m.fileBrowserEntries = listDir(child)
+			m.fileBrowserIndex = 0
+			m.fileBrowserScroll = 0
+			return m, nil
+		}
+		// A file — select it as the host path.
+		m.runVolumeHostInput = filepath.Join(m.fileBrowserPath, entry)
+		m.runVolumePickerMode = types.VolumePickerBind
+		m.runVolumeContInput = ""
+		m.currentView = types.ViewModeRunVolumePicker
+		return m, nil
+	}
+	return m, nil
+}
+
+// listDir returns sorted entries of a directory. Directories are appended
+// with "/" so the renderer can tell them apart from files. ".." is always
+// the first entry (so users can navigate up). On error, returns just "..".
+func listDir(path string) []string {
+	out := []string{"../"}
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return out
+	}
+	var dirs, files []string
+	for _, e := range entries {
+		name := e.Name()
+		// Skip dotfiles — they clutter the view; users who need them can
+		// type the path manually later.
+		if strings.HasPrefix(name, ".") {
+			continue
+		}
+		if e.IsDir() {
+			dirs = append(dirs, name+"/")
+		} else {
+			files = append(files, name)
+		}
+	}
+	sort.Strings(dirs)
+	sort.Strings(files)
+	out = append(out, dirs...)
+	out = append(out, files...)
+	return out
 }

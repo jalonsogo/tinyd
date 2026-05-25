@@ -69,6 +69,12 @@ func (m *Model) View() string {
 		return m.renderInspectView()
 	case types.ViewModePullImage, types.ViewModePullModel:
 		return m.renderPullView()
+	case types.ViewModeRunImage:
+		return m.renderRunModal()
+	case types.ViewModeRunVolumePicker:
+		return m.renderVolumePicker()
+	case types.ViewModeRunFileBrowser:
+		return m.renderFileBrowser()
 	default:
 		return "Unknown view mode\n\nPress q to quit"
 	}
@@ -968,11 +974,11 @@ func (m *Model) renderHelpOverlay() string {
 	row("D", "Delete")
 
 	section("Images")
-	row("S", "Run image")
+	row("R", "Run image (name / ports / volumes / env)")
 	row("U", "Update to latest")
 	row("I", "Inspect")
 	row("D", "Delete")
-	row("P", "Add image (search Docker Hub)")
+	row("P", "Pull image (search Docker Hub)")
 
 	section("Volumes / Networks")
 	row("I", "Inspect")
@@ -1009,7 +1015,7 @@ func (m *Model) renderPullView() string {
 	errorStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#FF4444"))
 
 	// Header
-	headerText := "Add image from Docker Hub"
+	headerText := "Pull image from Docker Hub"
 	if m.currentView == types.ViewModePullModel {
 		headerText = "Pull model from Docker Hub"
 	}
@@ -1633,12 +1639,12 @@ func (m *Model) getActionShortcuts() string {
 	case types.TabImages:
 		sep := lipgloss.NewStyle().Foreground(components.ColorBorder).Render("│")
 		shortcuts = []string{
-			renderShortcut("S", "tart"),
+			renderShortcut("R", "un"),
 			renderShortcut("U", "pdate to latest"),
 			renderShortcut("I", "nspect"),
 			renderShortcut("D", "elete"),
 			sep,
-			renderShortcut("P", " Add image"),
+			renderShortcut("P", "ull image"),
 		}
 	case types.TabVolumes:
 		shortcuts = []string{
@@ -1943,4 +1949,346 @@ func shortenTimeAgo(timeStr string) string {
 	s = strings.Replace(s, " years ago", "y ago", 1)
 	s = strings.Replace(s, " year ago", "y ago", 1)
 	return s
+}
+
+// --- Run image modal renders ---
+
+// renderRunModal renders the full-screen Run image form.
+//
+// Layout:
+//   Run image — repo:tag                              [TAB] Next  [Ctrl+R] Run  [ESC] Cancel
+//   ─────────
+//   Container name
+//   > _________________
+//
+//   Ports (host:container)
+//     8080:80
+//   > 3000:3000
+//
+//   Volumes
+//     data-vol -> /data
+//   > [+ Add volume]
+//
+//   Env vars (KEY=value)
+//     NODE_ENV=prod
+//   > FOO=bar
+//
+//   [ Run ]
+func (m *Model) renderRunModal() string {
+	var b strings.Builder
+
+	titleStyle := lipgloss.NewStyle().Foreground(components.ColorBright).Bold(true)
+	helpStyle := lipgloss.NewStyle().Foreground(components.ColorNormal)
+	lineStyle := lipgloss.NewStyle().Foreground(components.ColorBorder)
+	dimStyle := lipgloss.NewStyle().Foreground(components.ColorDim)
+	normalStyle := lipgloss.NewStyle().Foreground(components.ColorNormal)
+	brightStyle := lipgloss.NewStyle().Foreground(components.ColorBright)
+	focusStyle := lipgloss.NewStyle().Foreground(components.ColorBright).Bold(true)
+	buttonStyle := lipgloss.NewStyle().
+		Background(components.ColorSelectedBg).
+		Foreground(components.ColorSelectedFg).
+		Bold(true).
+		Padding(0, 2)
+
+	// Header
+	imgRef := ""
+	if m.selectedImage != nil {
+		imgRef = m.selectedImage.Repository + ":" + m.selectedImage.Tag
+	}
+	header := "Run image — " + imgRef
+	right := "[TAB] Next  [ENTER] Add  [Ctrl+R] Run  [ESC] Cancel"
+	spacing := strings.Repeat(" ", max(1, m.width-len(header)-len(right)-4))
+	b.WriteString(titleStyle.Render(header))
+	b.WriteString(spacing)
+	b.WriteString(helpStyle.Render(right))
+	b.WriteString("\n")
+	b.WriteString(lineStyle.Render(strings.Repeat("─", m.width-2)))
+	b.WriteString("\n\n")
+
+	// --- Container name ---
+	b.WriteString(sectionLabel("Container name", m.runModalField == types.RunFieldName))
+	b.WriteString("\n")
+	b.WriteString(renderRunInput(m.runContainerName, "auto-generated if blank",
+		m.runModalField == types.RunFieldName, m.animationFrame))
+	b.WriteString("\n\n")
+
+	// --- Ports ---
+	b.WriteString(sectionLabel("Ports (host:container)", m.runModalField == types.RunFieldPortInput))
+	b.WriteString("\n")
+	for _, p := range m.runPorts {
+		b.WriteString("   ")
+		b.WriteString(normalStyle.Render(p.Host + ":" + p.Container))
+		b.WriteString("\n")
+	}
+	b.WriteString(renderRunInput(m.runPortInput, "e.g. 8080:80 then ENTER",
+		m.runModalField == types.RunFieldPortInput, m.animationFrame))
+	b.WriteString("\n\n")
+
+	// --- Volumes ---
+	b.WriteString(sectionLabel("Volumes", m.runModalField == types.RunFieldVolumeAdd))
+	b.WriteString("\n")
+	for _, v := range m.runVolumes {
+		src := v.Host
+		kind := "(bind)"
+		if v.IsNamed {
+			src = v.VolumeName
+			kind = "(volume)"
+		}
+		b.WriteString("   ")
+		b.WriteString(normalStyle.Render(src + " → " + v.Container))
+		b.WriteString(" ")
+		b.WriteString(dimStyle.Render(kind))
+		b.WriteString("\n")
+	}
+	addLabel := "[+ Add volume]"
+	if m.runModalField == types.RunFieldVolumeAdd {
+		b.WriteString(" > ")
+		b.WriteString(focusStyle.Render(addLabel))
+		b.WriteString(" ")
+		b.WriteString(dimStyle.Render("(ENTER opens picker)"))
+	} else {
+		b.WriteString("   ")
+		b.WriteString(dimStyle.Render(addLabel))
+	}
+	b.WriteString("\n\n")
+
+	// --- Env vars ---
+	b.WriteString(sectionLabel("Env vars (KEY=value)", m.runModalField == types.RunFieldEnvInput))
+	b.WriteString("\n")
+	for _, e := range m.runEnvVars {
+		b.WriteString("   ")
+		b.WriteString(normalStyle.Render(e.Key + "=" + e.Value))
+		b.WriteString("\n")
+	}
+	b.WriteString(renderRunInput(m.runEnvInput, "e.g. NODE_ENV=production then ENTER",
+		m.runModalField == types.RunFieldEnvInput, m.animationFrame))
+	b.WriteString("\n\n")
+
+	// --- Submit button ---
+	if m.runModalField == types.RunFieldSubmit {
+		b.WriteString(" > ")
+		b.WriteString(buttonStyle.Render("Run container"))
+		b.WriteString("  ")
+		b.WriteString(dimStyle.Render("(ENTER or Ctrl+R)"))
+	} else {
+		b.WriteString("   ")
+		b.WriteString(dimStyle.Render("[ Run container ] — Ctrl+R any time"))
+	}
+	b.WriteString("\n")
+
+	_ = brightStyle
+	return b.String()
+}
+
+// sectionLabel renders a section header with a focus indicator.
+func sectionLabel(label string, focused bool) string {
+	if focused {
+		return lipgloss.NewStyle().Foreground(components.ColorBright).Bold(true).Render(" " + label)
+	}
+	return lipgloss.NewStyle().Foreground(components.ColorDim).Render(" " + label)
+}
+
+// renderRunInput renders an input row: a prompt "> " when focused (with a
+// blinking cursor), or a dim hint when unfocused.
+func renderRunInput(value, placeholder string, focused bool, frame int) string {
+	normalStyle := lipgloss.NewStyle().Foreground(components.ColorNormal)
+	dimStyle := lipgloss.NewStyle().Foreground(components.ColorDim)
+	brightStyle := lipgloss.NewStyle().Foreground(components.ColorBright)
+
+	if !focused {
+		if value == "" {
+			return "   " + dimStyle.Render("(none)")
+		}
+		return "   " + normalStyle.Render(value)
+	}
+	prefix := " > "
+	cursor := "▌"
+	if frame%2 == 1 {
+		cursor = " "
+	}
+	if value == "" {
+		return prefix + dimStyle.Render(placeholder) + brightStyle.Render(cursor)
+	}
+	return prefix + normalStyle.Render(value) + brightStyle.Render(cursor)
+}
+
+// renderVolumePicker renders the volume-add sub-view.
+func (m *Model) renderVolumePicker() string {
+	var b strings.Builder
+	titleStyle := lipgloss.NewStyle().Foreground(components.ColorBright).Bold(true)
+	helpStyle := lipgloss.NewStyle().Foreground(components.ColorNormal)
+	lineStyle := lipgloss.NewStyle().Foreground(components.ColorBorder)
+	dimStyle := lipgloss.NewStyle().Foreground(components.ColorDim)
+	normalStyle := lipgloss.NewStyle().Foreground(components.ColorNormal)
+	focusStyle := lipgloss.NewStyle().Foreground(components.ColorBright).Bold(true)
+
+	header := "Add volume mount"
+	right := "[↑↓] Move  [ENTER] Select  [ESC] Back"
+	spacing := strings.Repeat(" ", max(1, m.width-len(header)-len(right)-4))
+	b.WriteString(titleStyle.Render(header))
+	b.WriteString(spacing)
+	b.WriteString(helpStyle.Render(right))
+	b.WriteString("\n")
+	b.WriteString(lineStyle.Render(strings.Repeat("─", m.width-2)))
+	b.WriteString("\n\n")
+
+	switch m.runVolumePickerMode {
+	case types.VolumePickerChoose:
+		options := []string{
+			"Select an existing volume",
+			"Create a new named volume",
+			"Bind mount (pick a host path)",
+		}
+		for i, opt := range options {
+			if i == m.runVolumePickerIndex {
+				b.WriteString(" > ")
+				b.WriteString(focusStyle.Render(opt))
+			} else {
+				b.WriteString("   ")
+				b.WriteString(normalStyle.Render(opt))
+			}
+			b.WriteString("\n")
+		}
+
+	case types.VolumePickerExisting:
+		listFocused := m.runVolumePickerSub == 0
+		pathFocused := m.runVolumePickerSub == 1
+		b.WriteString(sectionLabel("Available volumes", listFocused))
+		b.WriteString("\n")
+		if len(m.volumes) == 0 {
+			b.WriteString("   ")
+			b.WriteString(dimStyle.Render("(no volumes — press ESC and pick another option)"))
+			b.WriteString("\n")
+		} else {
+			pickedStyle := lipgloss.NewStyle().Foreground(components.ColorBright)
+			for i, v := range m.volumes {
+				selected := i == m.runVolumePickerIndex
+				prefix := "   "
+				style := normalStyle
+				switch {
+				case selected && listFocused:
+					prefix = " > "
+					style = focusStyle
+				case selected:
+					prefix = " • "
+					style = pickedStyle
+				}
+				inUse := ""
+				if v.InUse {
+					inUse = dimStyle.Render(" (in use)")
+				}
+				b.WriteString(prefix)
+				b.WriteString(style.Render(v.Name))
+				b.WriteString(inUse)
+				b.WriteString("\n")
+			}
+		}
+		b.WriteString("\n")
+		b.WriteString(sectionLabel("Container mount path", pathFocused))
+		b.WriteString("\n")
+		b.WriteString(renderRunInput(m.runVolumeContInput, "e.g. /data", pathFocused, m.animationFrame))
+		b.WriteString("\n\n")
+		if listFocused {
+			b.WriteString(dimStyle.Render(" ↑/↓ to pick a volume, ENTER (or TAB) to set the path."))
+		} else {
+			b.WriteString(dimStyle.Render(" Type the path and press ENTER to attach. TAB to go back to list."))
+		}
+
+	case types.VolumePickerNew:
+		nameFocused := m.runVolumePickerSub == 0
+		contFocused := m.runVolumePickerSub == 1
+		b.WriteString(sectionLabel("New volume name", nameFocused))
+		b.WriteString("\n")
+		b.WriteString(renderRunInput(m.runVolumeNameInput, "e.g. my-data", nameFocused, m.animationFrame))
+		b.WriteString("\n\n")
+		b.WriteString(sectionLabel("Container mount path", contFocused))
+		b.WriteString("\n")
+		b.WriteString(renderRunInput(m.runVolumeContInput, "e.g. /data", contFocused, m.animationFrame))
+		b.WriteString("\n\n")
+		b.WriteString(dimStyle.Render(" Press TAB (or ENTER on name) to switch fields, ENTER on path to attach."))
+
+	case types.VolumePickerBind:
+		b.WriteString(sectionLabel("Host path", false))
+		b.WriteString("\n")
+		b.WriteString("   ")
+		b.WriteString(normalStyle.Render(m.runVolumeHostInput))
+		b.WriteString("\n\n")
+		b.WriteString(sectionLabel("Container mount path", true))
+		b.WriteString("\n")
+		b.WriteString(renderRunInput(m.runVolumeContInput, "e.g. /data", true, m.animationFrame))
+		b.WriteString("\n\n")
+		b.WriteString(dimStyle.Render(" Press ENTER to attach the bind mount."))
+	}
+
+	return b.String()
+}
+
+// renderFileBrowser renders the host-path picker.
+func (m *Model) renderFileBrowser() string {
+	var b strings.Builder
+	titleStyle := lipgloss.NewStyle().Foreground(components.ColorBright).Bold(true)
+	helpStyle := lipgloss.NewStyle().Foreground(components.ColorNormal)
+	lineStyle := lipgloss.NewStyle().Foreground(components.ColorBorder)
+	dimStyle := lipgloss.NewStyle().Foreground(components.ColorDim)
+	normalStyle := lipgloss.NewStyle().Foreground(components.ColorNormal)
+	selectedStyle := lipgloss.NewStyle().
+		Background(components.ColorSelectedBg).
+		Foreground(components.ColorSelectedFg).
+		Bold(true)
+
+	header := "Choose host path"
+	right := "[↑↓] Move  [ENTER] Open  [F] Select dir  [ESC] Back"
+	spacing := strings.Repeat(" ", max(1, m.width-len(header)-len(right)-4))
+	b.WriteString(titleStyle.Render(header))
+	b.WriteString(spacing)
+	b.WriteString(helpStyle.Render(right))
+	b.WriteString("\n")
+	b.WriteString(lineStyle.Render(strings.Repeat("─", m.width-2)))
+	b.WriteString("\n")
+	b.WriteString(" ")
+	b.WriteString(dimStyle.Render("Path: "))
+	b.WriteString(normalStyle.Render(m.fileBrowserPath))
+	b.WriteString("\n\n")
+
+	// Show up to viewport-height entries.
+	visible := m.height - 8
+	if visible < 5 {
+		visible = 5
+	}
+	// Adjust scroll window around the selected row.
+	if m.fileBrowserIndex < m.fileBrowserScroll {
+		m.fileBrowserScroll = m.fileBrowserIndex
+	}
+	if m.fileBrowserIndex >= m.fileBrowserScroll+visible {
+		m.fileBrowserScroll = m.fileBrowserIndex - visible + 1
+	}
+	start := m.fileBrowserScroll
+	end := start + visible
+	if end > len(m.fileBrowserEntries) {
+		end = len(m.fileBrowserEntries)
+	}
+
+	for i := start; i < end; i++ {
+		entry := m.fileBrowserEntries[i]
+		isDir := strings.HasSuffix(entry, "/")
+		display := entry
+		if i == m.fileBrowserIndex {
+			b.WriteString(selectedStyle.Render(" " + padRightStr(display, m.width-4) + " "))
+		} else {
+			b.WriteString("  ")
+			if isDir {
+				b.WriteString(lipgloss.NewStyle().Foreground(components.ColorBright).Render(display))
+			} else {
+				b.WriteString(normalStyle.Render(display))
+			}
+		}
+		b.WriteString("\n")
+	}
+
+	if len(m.fileBrowserEntries) > visible {
+		b.WriteString("\n")
+		b.WriteString(dimStyle.Render(fmt.Sprintf(" Showing %d-%d of %d", start+1, end, len(m.fileBrowserEntries))))
+	}
+
+	return b.String()
 }

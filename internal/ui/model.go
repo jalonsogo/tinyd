@@ -77,18 +77,33 @@ type Model struct {
 	selectedFilter  int
 
 	// Run image modal
-	runContainerName   string
-	runPortHost        string
-	runPortContainer   string
-	runPorts           []types.PortMapping
-	runVolumes         []types.VolumeMapping
-	runEnvVars         []types.EnvVar
-	runSelectedVolume  string
-	runVolumeHost      string
-	runVolumeContainer string
-	runEnvKey          string
-	runEnvValue        string
-	runModalField      int
+	runContainerName string
+	runPorts         []types.PortMapping
+	runVolumes       []types.VolumeMapping
+	runEnvVars       []types.EnvVar
+
+	// Current input rows (bottom row of each list — Enter commits to the
+	// list above and clears the field).
+	runPortInput string // "8080:80"
+	runEnvInput  string // "KEY=value"
+
+	// Which input field has focus (see RunField* in types).
+	runModalField int
+
+	// Volume picker sub-view state. runVolumePickerMode toggles between
+	// the type-chooser and the type-specific input.
+	runVolumePickerMode  int // VolumePickerChoose / Existing / New / Bind
+	runVolumePickerIndex int // cursor in the chooser / existing list
+	runVolumePickerSub   int // 0 = primary cursor, 1 = container-path input
+	runVolumeNameInput   string
+	runVolumeHostInput   string // for bind mount
+	runVolumeContInput   string // container path
+
+	// File browser state — used when configuring a bind mount.
+	fileBrowserPath    string   // current directory
+	fileBrowserEntries []string // sorted entries (dirs end with /)
+	fileBrowserIndex   int
+	fileBrowserScroll  int
 
 	// Pull image modal
 	pullImageName string

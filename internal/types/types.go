@@ -128,6 +128,26 @@ const (
 	ViewModeRunImage
 	ViewModePullImage
 	ViewModePullModel
+	ViewModeRunVolumePicker
+	ViewModeRunFileBrowser
+)
+
+// Run modal field tags — used to know which input row TAB / typing affects.
+const (
+	RunFieldName       = iota // container name
+	RunFieldPortInput         // port host:container input row
+	RunFieldVolumeAdd         // "+ Add volume" row (Enter opens picker)
+	RunFieldEnvInput          // env key=value input row
+	RunFieldSubmit            // [Run] button
+	RunFieldCount             // sentinel; keep last
+)
+
+// Volume picker mode — which kind of mount the user is configuring.
+const (
+	VolumePickerChoose = iota // picking type
+	VolumePickerExisting      // selecting from m.volumes
+	VolumePickerNew           // typing a new named volume
+	VolumePickerBind          // bind mount (host path picked via file browser)
 )
 
 // Tab indices — declared so the rest of the codebase can stop hard-coding 0..4.
@@ -167,13 +187,3 @@ const (
 	NetworkFilterUnused
 )
 
-// Run modal field indices
-const (
-	RunFieldContainerName = iota
-	RunFieldPortHost
-	RunFieldPortContainer
-	RunFieldVolumeHost
-	RunFieldVolumeContainer
-	RunFieldEnvKey
-	RunFieldEnvValue
-)

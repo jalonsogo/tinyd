@@ -154,10 +154,8 @@ func (t TabsComponent) View() string {
 	for i, tab := range t.tabs {
 		tabText := fmt.Sprintf(" %s ", tab.Name)
 		bStyle := borderStyle
-		textStyle := inactiveText
 		if i == t.activeTab {
 			bStyle = activeBorderStyle
-			textStyle = activeText
 		}
 		b.WriteString(bStyle.Render("│"))
 		textStyle := lipgloss.NewStyle().Foreground(inactiveText)

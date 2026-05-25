@@ -597,12 +597,6 @@ func (m *Model) handleListViewKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case "u", "U":
-		if m.activeTab == types.TabImages {
-			return m.handleImageUpdate()
-		}
-		return m, nil
-
 	default:
 		return m, nil
 	}

@@ -122,14 +122,13 @@ func (t TabsComponent) SetActiveTab(index int) TabsComponent {
 func (t TabsComponent) View() string {
 	var b strings.Builder
 
-	// In light mode we swap active/inactive text colors so the active tab
-	// label stands out (the dark palette would otherwise render it near-
-	// invisible). Borders follow the standard convention: active = darker
-	// (ColorActiveBorder), inactive = lighter (ColorBorder).
-	activeText, inactiveText := ColorBright, ColorDim
-	if !DarkBackground {
-		activeText, inactiveText = ColorDim, ColorBright
-	}
+	// Active tab text and border use the terminal's default foreground
+	// + bold (no explicit color) so they stay readable on both light and
+	// dark terminals, even when palette detection guessed wrong.
+	// Inactive elements use ColorDim / ColorBorder, which are the same
+	// medium-gray hex value in both palettes — visible on either bg.
+	activeText := lipgloss.NewStyle().Bold(true)
+	inactiveText := lipgloss.NewStyle().Foreground(ColorDim)
 
 	borderStyle := lipgloss.NewStyle().Foreground(ColorBorder)
 	activeBorderStyle := lipgloss.NewStyle().Bold(true)
@@ -160,10 +159,6 @@ func (t TabsComponent) View() string {
 			textStyle = activeText
 		}
 		b.WriteString(bStyle.Render("│"))
-		textStyle := lipgloss.NewStyle().Foreground(inactiveText)
-		if i == t.activeTab {
-			textStyle = lipgloss.NewStyle().Foreground(activeText).Bold(true)
-		}
 		b.WriteString(textStyle.Render(tabText))
 		b.WriteString(bStyle.Render("│"))
 	}

@@ -115,6 +115,15 @@ func (t TabsComponent) SetActiveTab(index int) TabsComponent {
 func (t TabsComponent) View() string {
 	var b strings.Builder
 
+	// In light mode we swap active/inactive text colors so the active tab
+	// label stands out (the dark palette would otherwise render it near-
+	// invisible). Borders follow the standard convention: active = darker
+	// (ColorActiveBorder), inactive = lighter (ColorBorder).
+	activeText, inactiveText := ColorBright, ColorDim
+	if !DarkBackground {
+		activeText, inactiveText = ColorDim, ColorBright
+	}
+
 	borderStyle := lipgloss.NewStyle().Foreground(ColorBorder)
 	activeBorderStyle := lipgloss.NewStyle().Foreground(ColorActiveBorder).Bold(true)
 
@@ -142,9 +151,9 @@ func (t TabsComponent) View() string {
 			bStyle = activeBorderStyle
 		}
 		b.WriteString(bStyle.Render("│"))
-		textStyle := lipgloss.NewStyle().Foreground(ColorDim)
+		textStyle := lipgloss.NewStyle().Foreground(inactiveText)
 		if i == t.activeTab {
-			textStyle = lipgloss.NewStyle().Foreground(ColorBright).Bold(true)
+			textStyle = lipgloss.NewStyle().Foreground(activeText).Bold(true)
 		}
 		b.WriteString(textStyle.Render(tabText))
 		b.WriteString(bStyle.Render("│"))

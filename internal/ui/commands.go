@@ -204,6 +204,20 @@ func (m *Model) pullImageCmd(imageName string) tea.Cmd {
 	}
 }
 
+// updateImageCmd re-pulls an existing image to update it to the latest
+// version under its tag. Same call as pullImageCmd, different status text.
+func (m *Model) updateImageCmd(imageName string) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := m.docker.WithCustomTimeout(docker.TimeoutLong)
+		defer cancel()
+
+		if err := m.docker.PullImage(ctx, imageName); err != nil {
+			return types.ActionErrorMsg("Failed to update " + imageName + ": " + err.Error())
+		}
+		return types.ActionSuccessMsg("Updated " + imageName + " to latest")
+	}
+}
+
 // pullSearchCompleteCmd pulls an image and ensures the user is returned to the
 // list view (the generic pull command returns ActionSuccessMsg which doesn't
 // reset currentView). We chain a final state-reset message so completion exits

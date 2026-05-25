@@ -969,9 +969,10 @@ func (m *Model) renderHelpOverlay() string {
 
 	section("Images")
 	row("S", "Run image")
-	row("P", "Pull image (search Docker Hub)")
+	row("U", "Update to latest")
 	row("I", "Inspect")
 	row("D", "Delete")
+	row("P", "Add image (search Docker Hub)")
 
 	section("Volumes / Networks")
 	row("I", "Inspect")
@@ -1008,7 +1009,10 @@ func (m *Model) renderPullView() string {
 	errorStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#FF4444"))
 
 	// Header
-	headerText := "Pull image from Docker Hub"
+	headerText := "Add image from Docker Hub"
+	if m.currentView == types.ViewModePullModel {
+		headerText = "Pull model from Docker Hub"
+	}
 	var headerRight string
 	switch m.pullStage {
 	case 0:
@@ -1627,11 +1631,14 @@ func (m *Model) getActionShortcuts() string {
 			}
 		}
 	case types.TabImages:
+		sep := lipgloss.NewStyle().Foreground(components.ColorBorder).Render("│")
 		shortcuts = []string{
 			renderShortcut("S", "tart"),
-			renderShortcut("P", "ull image"),
+			renderShortcut("U", "pdate to latest"),
 			renderShortcut("I", "nspect"),
 			renderShortcut("D", "elete"),
+			sep,
+			renderShortcut("P", " Add image"),
 		}
 	case types.TabVolumes:
 		shortcuts = []string{

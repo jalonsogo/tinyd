@@ -67,6 +67,19 @@ type EnvVar struct {
 	Value string
 }
 
+// ChatMessage is one turn in a chat conversation with a DMR model.
+type ChatMessage struct {
+	Role    string // "user" or "assistant"
+	Content string
+}
+
+// ColumnDef describes a togglable table column. Key is the value stored
+// in hiddenColumns; Label is what the picker overlay shows.
+type ColumnDef struct {
+	Key   string
+	Label string
+}
+
 // ImageSearchItem is a single Docker Hub search result
 type ImageSearchItem struct {
 	Name          string
@@ -96,6 +109,23 @@ type ModelSearchItem struct {
 	Stars         int
 	Pulls         int
 	Architectures []string
+}
+
+// ModelTagInfo is one selectable tag for a model repo. Parameters and
+// Quantization are best-effort: they're parsed from the tag name when it
+// follows the ai/ namespace convention (e.g. "7b-instruct-q4_K_M").
+type ModelTagInfo struct {
+	Tag        string
+	Parameters string // e.g. "7B", "1.5B"
+	Quant      string // e.g. "q4_K_M", "f16"
+	Size       string // human-readable
+	Updated    string // YYYY-MM-DD
+}
+
+// ModelTagsMsg carries the result of a Hub tag fetch into the Update loop.
+type ModelTagsMsg struct {
+	Repo string
+	Tags []ModelTagInfo
 }
 
 // Message types for Bubble Tea
@@ -128,6 +158,44 @@ const (
 	ViewModeRunImage
 	ViewModePullImage
 	ViewModePullModel
+	ViewModeRunVolumePicker
+	ViewModeRunFileBrowser
+	ViewModeChat
+	ViewModeModelTagPicker
+)
+
+// Chat streaming messages — emitted by the chat command chain.
+type ChatStartedMsg struct {
+	// Reader produces SSE-style "data: {json}" lines from DMR.
+	// Caller stores both on the model and closes Body when done.
+	Reader interface{} // *bufio.Reader (kept opaque so types/ has no bufio dep)
+	Body   interface{} // io.Closer
+}
+
+// ChatTokenMsg is one decoded chunk of the assistant's response. Done
+// signals end-of-stream; Err is set on a fatal stream error.
+type ChatTokenMsg struct {
+	Token string
+	Done  bool
+	Err   string
+}
+
+// Run modal field tags — used to know which input row TAB / typing affects.
+const (
+	RunFieldName       = iota // container name
+	RunFieldPortInput         // port host:container input row
+	RunFieldVolumeAdd         // "+ Add volume" row (Enter opens picker)
+	RunFieldEnvInput          // env key=value input row
+	RunFieldSubmit            // [Run] button
+	RunFieldCount             // sentinel; keep last
+)
+
+// Volume picker mode — which kind of mount the user is configuring.
+const (
+	VolumePickerChoose = iota // picking type
+	VolumePickerExisting      // selecting from m.volumes
+	VolumePickerNew           // typing a new named volume
+	VolumePickerBind          // bind mount (host path picked via file browser)
 )
 
 // Tab indices — declared so the rest of the codebase can stop hard-coding 0..4.
@@ -167,13 +235,3 @@ const (
 	NetworkFilterUnused
 )
 
-// Run modal field indices
-const (
-	RunFieldContainerName = iota
-	RunFieldPortHost
-	RunFieldPortContainer
-	RunFieldVolumeHost
-	RunFieldVolumeContainer
-	RunFieldEnvKey
-	RunFieldEnvValue
-)

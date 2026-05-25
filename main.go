@@ -20,6 +20,28 @@ var (
 	date    = ""
 )
 
+// parseHiddenColumns turns TINYD_HIDE_COLS ("status,cpu,mem") into a set
+// of lowercased column keys. Unset env (empty input) defaults to hiding
+// the STATUS column; "-" or "none" disables all hiding.
+func parseHiddenColumns(env string) map[string]bool {
+	out := map[string]bool{}
+	env = strings.TrimSpace(env)
+	if env == "" {
+		out["status"] = true
+		return out
+	}
+	if env == "-" || strings.EqualFold(env, "none") {
+		return out
+	}
+	for _, k := range strings.Split(env, ",") {
+		k = strings.ToLower(strings.TrimSpace(k))
+		if k != "" {
+			out[k] = true
+		}
+	}
+	return out
+}
+
 // detectDark probes several reliable signals before falling back to lipgloss.
 // When OSC-11 is unsupported (common on macOS Terminal.app), lipgloss returns
 // true (dark) by default — incorrectly flagging light terminals. We check
@@ -77,7 +99,15 @@ func main() {
 	components.InitTheme(dark)
 	ui.InitTheme(dark)
 
-	model, err := ui.NewModel(version)
+	// Column visibility from env. TINYD_HIDE_COLS is a comma-separated
+	// list of column keys (case-insensitive): status, cpu, mem, ports,
+	// image, size, created, params, quant, driver, containers, ipv4,
+	// scope. Unset = hide "status" by default (the colored dot already
+	// encodes state, so the textual STATUS column is redundant for most
+	// users). Set to a single dash (-) to start with everything shown.
+	hidden := parseHiddenColumns(os.Getenv("TINYD_HIDE_COLS"))
+
+	model, err := ui.NewModel(version, hidden)
 	if err != nil {
 		fmt.Printf("Error initializing: %v\n", err)
 		os.Exit(1)

@@ -69,6 +69,16 @@ func (m *Model) View() string {
 		return m.renderInspectView()
 	case types.ViewModePullImage, types.ViewModePullModel:
 		return m.renderPullView()
+	case types.ViewModeRunImage:
+		return m.renderRunModal()
+	case types.ViewModeRunVolumePicker:
+		return m.renderVolumePicker()
+	case types.ViewModeRunFileBrowser:
+		return m.renderFileBrowser()
+	case types.ViewModeChat:
+		return m.renderChatView()
+	case types.ViewModeModelTagPicker:
+		return m.renderTagPicker()
 	default:
 		return "Unknown view mode\n\nPress q to quit"
 	}
@@ -83,10 +93,12 @@ func (m *Model) renderListView() string {
 	tabsContent := m.tabs.View()
 	b.WriteString(tabsContent)
 
-	// Render content based on active tab — or help overlay if active
+	// Render content based on active tab — or an overlay if active
 	var contentStr string
 	if m.showHelp {
 		contentStr = m.renderHelpOverlay()
+	} else if m.showColumnPicker {
+		contentStr = m.renderColumnPicker()
 	} else {
 		switch m.activeTab {
 		case types.TabContainers:
@@ -103,14 +115,23 @@ func (m *Model) renderListView() string {
 	}
 	b.WriteString(contentStr)
 
+	// On the Models tab we pin the API info panel just above the action
+	// bar, so the connection details are always visible at the bottom of
+	// the screen regardless of how many models are in the table.
+	var bottomPanel string
+	if !m.showHelp && m.activeTab == types.TabModels && m.dmrAvailable {
+		bottomPanel = m.renderModelsAPIPanel()
+	}
+
 	// Calculate padding to push action bar to bottom
 	// Count actual lines used (tabs + visible content rows + action bar)
 	tabsHeight := strings.Count(tabsContent, "\n")
 	contentHeight := strings.Count(contentStr, "\n")
+	panelHeight := strings.Count(bottomPanel, "\n")
 	actionBarHeight := 3
 
 	// Total used height including current content
-	usedHeight := tabsHeight + contentHeight + actionBarHeight + 2 // +2 for newlines
+	usedHeight := tabsHeight + contentHeight + panelHeight + actionBarHeight + 2 // +2 for newlines
 
 	// Add padding to push action bar to bottom
 	remainingHeight := m.height - usedHeight
@@ -119,6 +140,11 @@ func (m *Model) renderListView() string {
 	} else if remainingHeight < 0 {
 		// If content is too tall, don't add padding
 		b.WriteString("\n")
+	}
+
+	// Bottom panel sits just above the action bar.
+	if bottomPanel != "" {
+		b.WriteString(bottomPanel)
 	}
 
 	// Render action bar at bottom — always recompute actions for the current
@@ -142,47 +168,87 @@ func (m *Model) renderContainersTab() string {
 		return "No containers found"
 	}
 
-	// Calculate responsive column widths using full terminal width
-	totalWidth := m.width - 4 // Account for padding
+	showStatus := m.IsColumnVisible("status")
+	showImage := m.IsColumnVisible("image")
+	showCPU := m.IsColumnVisible("cpu")
+	showMem := m.IsColumnVisible("mem")
+	showPorts := m.IsColumnVisible("ports")
+
+	// Calculate responsive column widths from the visible set. Hidden
+	// fixed-width columns return their space to the fill columns.
+	totalWidth := m.width - 4
 	if totalWidth < 60 {
-		totalWidth = 60 // Minimum width for reasonable display
+		totalWidth = 60
 	}
-
-	// Fixed columns: dot(2) + STATUS(11) + CPU(8) + MEM(8) + Ports(15)
-	// Spacing: 6 gaps * 2 spaces = 12
 	statusW := 11
-	fixedWidth := 2 + statusW + 8 + 8 + 15
-	spacing := 6 * 2 // (7 columns - 1) * 2 spaces per gap
+	fixedWidth := 2 // status dot
+	if showStatus {
+		fixedWidth += statusW
+	}
+	if showCPU {
+		fixedWidth += 8
+	}
+	if showMem {
+		fixedWidth += 8
+	}
+	if showPorts {
+		fixedWidth += 15
+	}
+	// Count visible columns to compute gap spacing.
+	visibleN := 2 // dot + NAME (both always shown)
+	if showStatus {
+		visibleN++
+	}
+	if showImage {
+		visibleN++
+	}
+	if showCPU {
+		visibleN++
+	}
+	if showMem {
+		visibleN++
+	}
+	if showPorts {
+		visibleN++
+	}
+	spacing := (visibleN - 1) * 2
 	fillWidth := totalWidth - fixedWidth - spacing
-
-	// Ensure minimum width for fill columns
 	if fillWidth < 40 {
 		fillWidth = 40
 	}
-
-	// Two fill columns: Name and Image (distribute equally)
-	nameFill := fillWidth / 2
-	imageFill := fillWidth - nameFill
-
-	// Ensure each fill column has reasonable minimum
+	nameFill := fillWidth
+	imageFill := 0
+	if showImage {
+		nameFill = fillWidth / 2
+		imageFill = fillWidth - nameFill
+		if imageFill < 20 {
+			imageFill = 20
+		}
+	}
 	if nameFill < 20 {
 		nameFill = 20
 	}
-	if imageFill < 20 {
-		imageFill = 20
-	}
 
 	headers := []components.TableHeader{
-		{Label: "", Width: 2, AlignRight: false},          // Status dot
+		{Label: "", Width: 2, AlignRight: false},
 		{Label: "NAME", Width: nameFill, AlignRight: false},
-		{Label: "STATUS", Width: statusW, AlignRight: false},
-		{Label: "IMAGE", Width: imageFill, AlignRight: false},
-		{Label: "CPU", Width: 8, AlignRight: true},
-		{Label: "MEM", Width: 8, AlignRight: true},
-		{Label: "PORTS", Width: 15, AlignRight: false},
+	}
+	if showStatus {
+		headers = append(headers, components.TableHeader{Label: "STATUS", Width: statusW})
+	}
+	if showImage {
+		headers = append(headers, components.TableHeader{Label: "IMAGE", Width: imageFill})
+	}
+	if showCPU {
+		headers = append(headers, components.TableHeader{Label: "CPU", Width: 8, AlignRight: true})
+	}
+	if showMem {
+		headers = append(headers, components.TableHeader{Label: "MEM", Width: 8, AlignRight: true})
+	}
+	if showPorts {
+		headers = append(headers, components.TableHeader{Label: "PORTS", Width: 15})
 	}
 
-	// Build table rows (only visible ones based on scroll position)
 	var rows []components.TableRow
 	start := m.scrollOffset
 	end := m.scrollOffset + m.viewportHeight
@@ -196,7 +262,6 @@ func (m *Model) renderContainersTab() string {
 	for i := start; i < end; i++ {
 		c := m.containers[i]
 
-		// Handle delete confirmation overlay
 		if m.deleteConfirmMode && i == m.selectedRow {
 			confirmText := renderDeleteConfirmation(c.Name, m.deleteConfirmOption)
 			emptyCells := make([]string, len(headers)-1)
@@ -207,39 +272,42 @@ func (m *Model) renderContainersTab() string {
 			continue
 		}
 
-		statusCell := m.getStatusDot(c.Status, i == m.selectedRow)
+		dotCell := m.getStatusDot(c.Status, i == m.selectedRow)
 		if m.actionInProgress && m.actionTargetID == c.ID {
-			statusCell = m.spinnerDot(i == m.selectedRow)
+			dotCell = m.spinnerDot(i == m.selectedRow)
 		}
 		text, color := m.statusText(c.ID, c.Status)
-
-		// Dim non-running containers' Name/Image/CPU/Mem/Ports so the eye
-		// is drawn to active workloads. Selected rows keep full color so
-		// the highlight stays readable.
 		dimmed := c.Status != "RUNNING" && i != m.selectedRow
-		nameStr := truncateWithEllipsis(c.Name, headers[1].Width)
-		imageStr := truncateWithEllipsis(c.Image, headers[3].Width)
+		dim := lipgloss.NewStyle().Foreground(components.ColorDim)
+
+		nameStr := truncateWithEllipsis(c.Name, nameFill)
+		imageStr := truncateWithEllipsis(c.Image, imageFill)
 		cpuStr := c.CPU
 		memStr := c.Mem
 		portsStr := truncateWithEllipsis(c.Ports, 15)
-
 		if dimmed {
-			dim := lipgloss.NewStyle().Foreground(components.ColorDim)
-			nameStr = dim.Render(padRightStr(nameStr, headers[1].Width))
-			imageStr = dim.Render(padRightStr(imageStr, headers[3].Width))
+			nameStr = dim.Render(padRightStr(nameStr, nameFill))
+			imageStr = dim.Render(padRightStr(imageStr, imageFill))
 			cpuStr = dim.Render(padLeftStr(cpuStr, 8))
 			memStr = dim.Render(padLeftStr(memStr, 8))
 			portsStr = dim.Render(padRightStr(portsStr, 15))
 		}
 
-		cells := []string{
-			statusCell,
-			nameStr,
-			m.renderStatusCell(text, color, headers[2].Width, i == m.selectedRow),
-			imageStr,
-			cpuStr,
-			memStr,
-			portsStr,
+		cells := []string{dotCell, nameStr}
+		if showStatus {
+			cells = append(cells, m.renderStatusCell(text, color, statusW, i == m.selectedRow))
+		}
+		if showImage {
+			cells = append(cells, imageStr)
+		}
+		if showCPU {
+			cells = append(cells, cpuStr)
+		}
+		if showMem {
+			cells = append(cells, memStr)
+		}
+		if showPorts {
+			cells = append(cells, portsStr)
 		}
 
 		rows = append(rows, components.TableRow{
@@ -248,15 +316,12 @@ func (m *Model) renderContainersTab() string {
 		})
 	}
 
-	// Create and render table
 	table := components.NewTableComponent(headers).
 		WithWidth(m.width).
 		SetRows(rows).
 		SetVisibleRange(0, len(rows))
 
-	// Add scroll indicator
-	scrollInfo := m.getScrollIndicator(len(m.containers))
-	return table.View() + scrollInfo
+	return table.View() + m.getScrollIndicator(len(m.containers))
 }
 
 // renderImagesTab renders the images tab with proper table formatting
@@ -268,31 +333,51 @@ func (m *Model) renderImagesTab() string {
 		return "No images found"
 	}
 
-	// Calculate responsive column widths using full terminal width
+	showStatus := m.IsColumnVisible("status")
+	showSize := m.IsColumnVisible("size")
+	showCreated := m.IsColumnVisible("created")
+
 	totalWidth := m.width - 4
 	if totalWidth < 50 {
 		totalWidth = 50
 	}
-
-	// Fixed columns: dot(2) + STATUS(10) + Size(10) + Created(8)
-	// Spacing: 4 gaps * 2 spaces = 8
 	statusW := 10
-	fixedWidth := 2 + statusW + 10 + 8
-	spacing := 4 * 2 // (5 columns - 1) * 2 spaces per gap
+	fixedWidth := 2
+	if showStatus {
+		fixedWidth += statusW
+	}
+	if showSize {
+		fixedWidth += 10
+	}
+	if showCreated {
+		fixedWidth += 8
+	}
+	visibleN := 2 // dot + REPO:TAG
+	for _, on := range []bool{showStatus, showSize, showCreated} {
+		if on {
+			visibleN++
+		}
+	}
+	spacing := (visibleN - 1) * 2
 	fillWidth := totalWidth - fixedWidth - spacing
 	if fillWidth < 20 {
 		fillWidth = 20
 	}
 
 	headers := []components.TableHeader{
-		{Label: "", Width: 2, AlignRight: false},              // Status dot
-		{Label: "REPOSITORY:TAG", Width: fillWidth, AlignRight: false},
-		{Label: "STATUS", Width: statusW, AlignRight: false},
-		{Label: "SIZE", Width: 10, AlignRight: true},
-		{Label: "CREATED", Width: 8, AlignRight: false},
+		{Label: "", Width: 2},
+		{Label: "REPOSITORY:TAG", Width: fillWidth},
+	}
+	if showStatus {
+		headers = append(headers, components.TableHeader{Label: "STATUS", Width: statusW})
+	}
+	if showSize {
+		headers = append(headers, components.TableHeader{Label: "SIZE", Width: 10, AlignRight: true})
+	}
+	if showCreated {
+		headers = append(headers, components.TableHeader{Label: "CREATED", Width: 8})
 	}
 
-	// Build table rows (only visible ones based on scroll position)
 	var rows []components.TableRow
 	start := m.scrollOffset
 	end := m.scrollOffset + m.viewportHeight
@@ -306,7 +391,6 @@ func (m *Model) renderImagesTab() string {
 	for i := start; i < end; i++ {
 		img := m.images[i]
 
-		// Handle delete confirmation overlay
 		if m.deleteConfirmMode && i == m.selectedRow {
 			confirmText := renderDeleteConfirmation(img.Repository+":"+img.Tag, m.deleteConfirmOption)
 			emptyCells := make([]string, len(headers)-1)
@@ -317,20 +401,16 @@ func (m *Model) renderImagesTab() string {
 			continue
 		}
 
-		// Combine repository:tag
 		repoTag := img.Repository + ":" + img.Tag
-
-		// Only truncate if actually needed
 		repoTagCell := repoTag
-		if len(repoTag) > headers[1].Width {
-			repoTagCell = truncateWithEllipsis(repoTag, headers[1].Width)
+		if len(repoTag) > fillWidth {
+			repoTagCell = truncateWithEllipsis(repoTag, fillWidth)
 		}
 
-		statusCell := m.getImageStatusDot(img, i == m.selectedRow)
+		dotCell := m.getImageStatusDot(img, i == m.selectedRow)
 		if m.actionInProgress && m.actionTargetID == img.ID {
-			statusCell = m.spinnerDot(i == m.selectedRow)
+			dotCell = m.spinnerDot(i == m.selectedRow)
 		}
-		// Map the image flags onto our centralized status palette.
 		var stateKey string
 		switch {
 		case img.InUse:
@@ -341,12 +421,16 @@ func (m *Model) renderImagesTab() string {
 			stateKey = "IMG_UNUSED"
 		}
 		text, color := m.statusText(img.ID, stateKey)
-		cells := []string{
-			statusCell,
-			repoTagCell,
-			m.renderStatusCell(text, color, headers[2].Width, i == m.selectedRow),
-			img.Size,
-			shortenTimeAgo(img.Created),
+
+		cells := []string{dotCell, repoTagCell}
+		if showStatus {
+			cells = append(cells, m.renderStatusCell(text, color, statusW, i == m.selectedRow))
+		}
+		if showSize {
+			cells = append(cells, img.Size)
+		}
+		if showCreated {
+			cells = append(cells, shortenTimeAgo(img.Created))
 		}
 
 		rows = append(rows, components.TableRow{
@@ -355,15 +439,12 @@ func (m *Model) renderImagesTab() string {
 		})
 	}
 
-	// Create and render table
 	table := components.NewTableComponent(headers).
 		WithWidth(m.width).
 		SetRows(rows).
 		SetVisibleRange(0, len(rows))
 
-	// Add scroll indicator
-	scrollInfo := m.getScrollIndicator(len(m.images))
-	return table.View() + scrollInfo
+	return table.View() + m.getScrollIndicator(len(m.images))
 }
 
 // renderVolumesTab renders the volumes tab with proper table formatting
@@ -382,27 +463,49 @@ func (m *Model) renderVolumesTab() string {
 	}
 
 	// Fixed columns: Status(2)
-	// Spacing: 3 gaps * 2 spaces = 6
-	fixedWidth := 2
-	spacing := 3 * 2 // (4 columns - 1) * 2 spaces per gap
+	showContainers := m.IsColumnVisible("containers")
+	showMountpoint := m.IsColumnVisible("mountpoint")
+
+	fixedWidth := 2 // dot
+	visibleN := 2   // dot + NAME
+	for _, on := range []bool{showContainers, showMountpoint} {
+		if on {
+			visibleN++
+		}
+	}
+	spacing := (visibleN - 1) * 2
 	fillWidth := totalWidth - fixedWidth - spacing
 	if fillWidth < 30 {
 		fillWidth = 30
 	}
 
-	// Three fill columns: Name, Containers, Mount Point (distribute equally)
-	nameFill := fillWidth / 3
-	containersFill := fillWidth / 3
-	mountFill := fillWidth - nameFill - containersFill
-
-	headers := []components.TableHeader{
-		{Label: "", Width: 2, AlignRight: false},                    // Status
-		{Label: "NAME", Width: nameFill, AlignRight: false},
-		{Label: "CONTAINERS", Width: containersFill, AlignRight: false},
-		{Label: "MOUNT POINT", Width: mountFill, AlignRight: false},
+	// Distribute the fill width across the visible fill columns.
+	fillCount := 1 // NAME always shown
+	if showContainers {
+		fillCount++
+	}
+	if showMountpoint {
+		fillCount++
+	}
+	col := fillWidth / fillCount
+	nameFill := col
+	containersFill := col
+	mountFill := fillWidth - nameFill
+	if showContainers {
+		mountFill = fillWidth - nameFill - containersFill
 	}
 
-	// Build table rows (only visible ones based on scroll position)
+	headers := []components.TableHeader{
+		{Label: "", Width: 2},
+		{Label: "NAME", Width: nameFill},
+	}
+	if showContainers {
+		headers = append(headers, components.TableHeader{Label: "CONTAINERS", Width: containersFill})
+	}
+	if showMountpoint {
+		headers = append(headers, components.TableHeader{Label: "MOUNT POINT", Width: mountFill})
+	}
+
 	var rows []components.TableRow
 	start := m.scrollOffset
 	end := m.scrollOffset + m.viewportHeight
@@ -416,7 +519,6 @@ func (m *Model) renderVolumesTab() string {
 	for i := start; i < end; i++ {
 		vol := m.volumes[i]
 
-		// Handle delete confirmation overlay
 		if m.deleteConfirmMode && i == m.selectedRow {
 			confirmText := renderDeleteConfirmation(vol.Name, m.deleteConfirmOption)
 			emptyCells := make([]string, len(headers)-1)
@@ -427,22 +529,21 @@ func (m *Model) renderVolumesTab() string {
 			continue
 		}
 
-		statusDot := m.getInUseDot(vol.InUse, i == m.selectedRow)
+		dotCell := m.getInUseDot(vol.InUse, i == m.selectedRow)
 		if m.actionInProgress && m.actionTargetID == vol.Name {
-			statusDot = m.spinnerDot(i == m.selectedRow)
+			dotCell = m.spinnerDot(i == m.selectedRow)
 		}
-
-		// Show container names or "-" if not in use
 		containers := vol.Containers
 		if containers == "" {
 			containers = "-"
 		}
 
-		cells := []string{
-			statusDot,
-			truncateWithEllipsis(vol.Name, headers[1].Width),       // Fill column - truncate
-			truncateWithEllipsis(containers, headers[2].Width),     // Fill column - truncate
-			truncateWithEllipsis(vol.Mountpoint, headers[3].Width), // Fill column - truncate
+		cells := []string{dotCell, truncateWithEllipsis(vol.Name, nameFill)}
+		if showContainers {
+			cells = append(cells, truncateWithEllipsis(containers, containersFill))
+		}
+		if showMountpoint {
+			cells = append(cells, truncateWithEllipsis(vol.Mountpoint, mountFill))
 		}
 
 		rows = append(rows, components.TableRow{
@@ -451,15 +552,12 @@ func (m *Model) renderVolumesTab() string {
 		})
 	}
 
-	// Create and render table
 	table := components.NewTableComponent(headers).
 		WithWidth(m.width).
 		SetRows(rows).
 		SetVisibleRange(0, len(rows))
 
-	// Add scroll indicator
-	scrollInfo := m.getScrollIndicator(len(m.volumes))
-	return table.View() + scrollInfo
+	return table.View() + m.getScrollIndicator(len(m.volumes))
 }
 
 // renderNetworksTab renders the networks tab with proper table formatting
@@ -477,29 +575,57 @@ func (m *Model) renderNetworksTab() string {
 		totalWidth = 50
 	}
 
-	// Fixed columns: Status(2) + Driver(10) + Scope(8) + IPv4(18)
-	// Spacing: 5 gaps * 2 spaces = 10
-	fixedWidth := 2 + 10 + 8 + 18
-	spacing := 5 * 2 // (6 columns - 1) * 2 spaces per gap
+	showContainers := m.IsColumnVisible("containers")
+	showDriver := m.IsColumnVisible("driver")
+	showScope := m.IsColumnVisible("scope")
+	showIPv4 := m.IsColumnVisible("ipv4")
+
+	fixedWidth := 2 // dot
+	if showDriver {
+		fixedWidth += 10
+	}
+	if showScope {
+		fixedWidth += 8
+	}
+	if showIPv4 {
+		fixedWidth += 18
+	}
+	visibleN := 2 // dot + NAME
+	for _, on := range []bool{showContainers, showDriver, showScope, showIPv4} {
+		if on {
+			visibleN++
+		}
+	}
+	spacing := (visibleN - 1) * 2
 	fillWidth := totalWidth - fixedWidth - spacing
 	if fillWidth < 20 {
 		fillWidth = 20
 	}
 
-	// Two fill columns: Name and Containers (distribute equally)
-	nameFill := fillWidth / 2
-	containersFill := fillWidth - nameFill
-
-	headers := []components.TableHeader{
-		{Label: "", Width: 2, AlignRight: false},                        // Status
-		{Label: "NAME", Width: nameFill, AlignRight: false},
-		{Label: "CONTAINERS", Width: containersFill, AlignRight: false},
-		{Label: "DRIVER", Width: 10, AlignRight: false},
-		{Label: "SCOPE", Width: 8, AlignRight: false},
-		{Label: "IPv4", Width: 18, AlignRight: false},
+	nameFill := fillWidth
+	containersFill := 0
+	if showContainers {
+		nameFill = fillWidth / 2
+		containersFill = fillWidth - nameFill
 	}
 
-	// Build table rows (only visible ones based on scroll position)
+	headers := []components.TableHeader{
+		{Label: "", Width: 2},
+		{Label: "NAME", Width: nameFill},
+	}
+	if showContainers {
+		headers = append(headers, components.TableHeader{Label: "CONTAINERS", Width: containersFill})
+	}
+	if showDriver {
+		headers = append(headers, components.TableHeader{Label: "DRIVER", Width: 10})
+	}
+	if showScope {
+		headers = append(headers, components.TableHeader{Label: "SCOPE", Width: 8})
+	}
+	if showIPv4 {
+		headers = append(headers, components.TableHeader{Label: "IPv4", Width: 18})
+	}
+
 	var rows []components.TableRow
 	start := m.scrollOffset
 	end := m.scrollOffset + m.viewportHeight
@@ -513,7 +639,6 @@ func (m *Model) renderNetworksTab() string {
 	for i := start; i < end; i++ {
 		net := m.networks[i]
 
-		// Handle delete confirmation overlay
 		if m.deleteConfirmMode && i == m.selectedRow {
 			confirmText := renderDeleteConfirmation(net.Name, m.deleteConfirmOption)
 			emptyCells := make([]string, len(headers)-1)
@@ -524,21 +649,24 @@ func (m *Model) renderNetworksTab() string {
 			continue
 		}
 
-		statusDot := m.getInUseDot(net.InUse, i == m.selectedRow)
+		dotCell := m.getInUseDot(net.InUse, i == m.selectedRow)
 		if m.actionInProgress && m.actionTargetID == net.ID {
-			statusDot = m.spinnerDot(i == m.selectedRow)
+			dotCell = m.spinnerDot(i == m.selectedRow)
 		}
-
-		// TODO: Add Containers field to Network type to show connected container names
 		containers := "-"
 
-		cells := []string{
-			statusDot,
-			truncateWithEllipsis(net.Name, headers[1].Width),       // Fill column - truncate
-			truncateWithEllipsis(containers, headers[2].Width),     // Fill column - truncate
-			net.Driver,                                              // Fixed column - short values
-			net.Scope,                                               // Fixed column - short values
-			truncateWithEllipsis(net.IPv4, 18),                     // Can be long
+		cells := []string{dotCell, truncateWithEllipsis(net.Name, nameFill)}
+		if showContainers {
+			cells = append(cells, truncateWithEllipsis(containers, containersFill))
+		}
+		if showDriver {
+			cells = append(cells, net.Driver)
+		}
+		if showScope {
+			cells = append(cells, net.Scope)
+		}
+		if showIPv4 {
+			cells = append(cells, truncateWithEllipsis(net.IPv4, 18))
 		}
 
 		rows = append(rows, components.TableRow{
@@ -563,7 +691,7 @@ func (m *Model) renderNetworksTab() string {
 // diagnosis + remediation; falls back to a wrapped raw message otherwise.
 func (m *Model) renderErrorScreen() string {
 	titleStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#FF4444")).Bold(true)
-	headingStyle := lipgloss.NewStyle().Foreground(components.ColorBright).Bold(true)
+	headingStyle := lipgloss.NewStyle().Bold(true)
 	bodyStyle := lipgloss.NewStyle().Foreground(components.ColorNormal)
 	dimStyle := lipgloss.NewStyle().Foreground(components.ColorDim)
 	codeStyle := lipgloss.NewStyle().Foreground(components.ColorHighlight)
@@ -675,7 +803,7 @@ func wrapForDisplay(s string, width int, indent string) string {
 func (m *Model) renderModelsTab() string {
 	if !m.dmrAvailable {
 		dim := lipgloss.NewStyle().Foreground(components.ColorDim)
-		bright := lipgloss.NewStyle().Foreground(components.ColorBright).Bold(true)
+		bright := lipgloss.NewStyle().Bold(true)
 		var b strings.Builder
 		b.WriteString("\n")
 		b.WriteString(bright.Render(" Docker Model Runner is not reachable"))
@@ -698,27 +826,56 @@ func (m *Model) renderModelsTab() string {
 		return "No local models. Press P to pull one from Docker Hub (ai/ namespace)."
 	}
 
+	showStatus := m.IsColumnVisible("status")
+	showParams := m.IsColumnVisible("params")
+	showQuant := m.IsColumnVisible("quant")
+	showSize := m.IsColumnVisible("size")
+
 	totalWidth := m.width - 4
 	if totalWidth < 60 {
 		totalWidth = 60
 	}
-
-	// Fixed: dot(2) + STATUS(10) + params(8) + quant(8) + size(8) — gaps: 5*2=10
 	statusW := 10
-	fixedWidth := 2 + statusW + 8 + 8 + 8
-	spacing := 5 * 2
+	fixedWidth := 2
+	if showStatus {
+		fixedWidth += statusW
+	}
+	if showParams {
+		fixedWidth += 8
+	}
+	if showQuant {
+		fixedWidth += 8
+	}
+	if showSize {
+		fixedWidth += 8
+	}
+	visibleN := 2 // dot + REPO:TAG
+	for _, on := range []bool{showStatus, showParams, showQuant, showSize} {
+		if on {
+			visibleN++
+		}
+	}
+	spacing := (visibleN - 1) * 2
 	fillWidth := totalWidth - fixedWidth - spacing
 	if fillWidth < 25 {
 		fillWidth = 25
 	}
 
 	headers := []components.TableHeader{
-		{Label: "", Width: 2, AlignRight: false},
-		{Label: "REPOSITORY:TAG", Width: fillWidth, AlignRight: false},
-		{Label: "STATUS", Width: statusW, AlignRight: false},
-		{Label: "PARAMS", Width: 8, AlignRight: true},
-		{Label: "QUANT", Width: 8, AlignRight: false},
-		{Label: "SIZE", Width: 8, AlignRight: true},
+		{Label: "", Width: 2},
+		{Label: "REPOSITORY:TAG", Width: fillWidth},
+	}
+	if showStatus {
+		headers = append(headers, components.TableHeader{Label: "STATUS", Width: statusW})
+	}
+	if showParams {
+		headers = append(headers, components.TableHeader{Label: "PARAMS", Width: 8, AlignRight: true})
+	}
+	if showQuant {
+		headers = append(headers, components.TableHeader{Label: "QUANT", Width: 8})
+	}
+	if showSize {
+		headers = append(headers, components.TableHeader{Label: "SIZE", Width: 8, AlignRight: true})
 	}
 
 	var rows []components.TableRow
@@ -745,19 +902,24 @@ func (m *Model) renderModelsTab() string {
 			continue
 		}
 
-		dot := m.getInUseDot(false, i == m.selectedRow) // DMR doesn't tell us loaded/unloaded yet; gray dot
+		dot := m.getInUseDot(false, i == m.selectedRow)
 		if m.actionInProgress && m.actionTargetID == ref {
 			dot = m.spinnerDot(i == m.selectedRow)
 		}
-
 		text, color := m.statusText(ref, "MDL_AVAILABLE")
-		cells := []string{
-			dot,
-			truncateWithEllipsis(ref, headers[1].Width),
-			m.renderStatusCell(text, color, headers[2].Width, i == m.selectedRow),
-			defaultStr(mod.ParamSize, "--"),
-			defaultStr(mod.Quant, "--"),
-			defaultStr(mod.Size, "--"),
+
+		cells := []string{dot, truncateWithEllipsis(ref, fillWidth)}
+		if showStatus {
+			cells = append(cells, m.renderStatusCell(text, color, statusW, i == m.selectedRow))
+		}
+		if showParams {
+			cells = append(cells, defaultStr(mod.ParamSize, "--"))
+		}
+		if showQuant {
+			cells = append(cells, defaultStr(mod.Quant, "--"))
+		}
+		if showSize {
+			cells = append(cells, defaultStr(mod.Size, "--"))
 		}
 		rows = append(rows, components.TableRow{
 			Cells:      cells,
@@ -784,7 +946,7 @@ func defaultStr(s, fallback string) string {
 func (m *Model) renderLogsView() string {
 	var b strings.Builder
 
-	titleStyle := lipgloss.NewStyle().Foreground(components.ColorBright).Bold(true)
+	titleStyle := lipgloss.NewStyle().Bold(true)
 	helpStyle := lipgloss.NewStyle().Foreground(components.ColorNormal)
 	lineStyle := lipgloss.NewStyle().Foreground(components.ColorBorder)
 	contentStyle := lipgloss.NewStyle().Foreground(components.ColorNormal)
@@ -848,7 +1010,7 @@ func (m *Model) renderLogsView() string {
 func (m *Model) renderInspectView() string {
 	var b strings.Builder
 
-	titleStyle := lipgloss.NewStyle().Foreground(components.ColorBright).Bold(true)
+	titleStyle := lipgloss.NewStyle().Bold(true)
 	helpStyle := lipgloss.NewStyle().Foreground(components.ColorNormal)
 	lineStyle := lipgloss.NewStyle().Foreground(components.ColorBorder)
 	contentStyle := lipgloss.NewStyle().Foreground(components.ColorNormal)
@@ -929,10 +1091,13 @@ func (m *Model) currentStatusMessage() string {
 func (m *Model) renderHelpOverlay() string {
 	var b strings.Builder
 
-	titleStyle := lipgloss.NewStyle().Foreground(components.ColorBright).Bold(true)
-	sectionStyle := lipgloss.NewStyle().Foreground(components.ColorHighlight).Bold(true)
-	keyStyle := lipgloss.NewStyle().Foreground(components.ColorBright).Bold(true)
-	descStyle := lipgloss.NewStyle().Foreground(components.ColorNormal)
+	titleStyle := lipgloss.NewStyle().Bold(true)
+	// Section headers and key cells use bold-only — no accent color, so
+	// the help screen reads as one neutral block instead of a noisy
+	// rainbow.
+	sectionStyle := lipgloss.NewStyle().Bold(true).Underline(true)
+	keyStyle := lipgloss.NewStyle().Bold(true)
+	descStyle := lipgloss.NewStyle().Foreground(components.ColorDim)
 	dimStyle := lipgloss.NewStyle().Foreground(components.ColorDim)
 
 	row := func(key, desc string) {
@@ -979,13 +1144,16 @@ func (m *Model) renderHelpOverlay() string {
 	row("D", "Delete")
 
 	section("Models (Docker Model Runner)")
-	row("R", "Run / chat REPL")
-	row("P", "Pull model (search ai/ namespace)")
+	row("C", "Chat in-app (streaming)")
+	row("R", "Drop to docker model run REPL")
+	row("P", "Pull model (variant picker → tag / params / quant / size)")
+	row("Y", "Yank curl example to clipboard")
 	row("I", "Inspect")
 	row("D", "Delete")
 
 	section("Global")
 	row("?", "Toggle this help")
+	row("V", "Customize visible columns (overlay)")
 	row("ESC", "Cancel / close overlay")
 	row("Ctrl+C ×2", "Quit")
 
@@ -996,12 +1164,15 @@ func (m *Model) renderHelpOverlay() string {
 func (m *Model) renderPullView() string {
 	var b strings.Builder
 
-	titleStyle := lipgloss.NewStyle().Foreground(components.ColorBright).Bold(true)
-	helpStyle := lipgloss.NewStyle().Foreground(components.ColorNormal)
+	// Emphasis uses bold + terminal-default fg so it stays readable on
+	// either palette (ColorBright collapses to near-white on a light
+	// terminal under the dark palette).
+	titleStyle := lipgloss.NewStyle().Bold(true)
+	helpStyle := lipgloss.NewStyle().Foreground(components.ColorDim)
 	lineStyle := lipgloss.NewStyle().Foreground(components.ColorBorder)
 	dimStyle := lipgloss.NewStyle().Foreground(components.ColorDim)
-	normalStyle := lipgloss.NewStyle().Foreground(components.ColorNormal)
-	brightStyle := lipgloss.NewStyle().Foreground(components.ColorBright)
+	normalStyle := lipgloss.NewStyle()
+	brightStyle := lipgloss.NewStyle().Bold(true)
 	selectedStyle := lipgloss.NewStyle().
 		Background(components.ColorSelectedBg).
 		Foreground(components.ColorSelectedFg).
@@ -1082,7 +1253,7 @@ func (m *Model) renderPullView() string {
 		}
 
 		// Header row
-		header := padRightStr("★", starsW) + "  " +
+		header := padRightStr("⭐", starsW) + "  " +
 			padRightStr("OFF", officialW) + "  " +
 			padRightStr("NAME", nameW) + "  " +
 			padRightStr("ARCH", archW) + "  " +
@@ -1502,10 +1673,18 @@ func statusTextStatic(s string) (string, lipgloss.Color) {
 // renderStatusCell renders the STATUS column value with the right color,
 // applying the selection background when the row is selected so the
 // highlight remains continuous.
+//
+// On the selected row we drop the per-status color (red/yellow/etc.) and
+// use the selection foreground instead. Red text on blue background
+// causes chromatic aberration on most LCDs and is hard to read; the
+// colored dot in the leftmost column already carries the status signal.
 func (m *Model) renderStatusCell(text string, fg lipgloss.Color, width int, selected bool) string {
 	s := lipgloss.NewStyle().Foreground(fg)
 	if selected {
-		s = s.Background(components.ColorSelectedBg).Bold(true)
+		s = lipgloss.NewStyle().
+			Background(components.ColorSelectedBg).
+			Foreground(components.ColorSelectedFg).
+			Bold(true)
 	}
 	return s.Render(padRightStr(text, width))
 }
@@ -1561,7 +1740,7 @@ func truncateWithEllipsis(s string, max int) string {
 
 // renderDeleteConfirmation renders an inline delete confirmation message
 func renderDeleteConfirmation(name string, selectedOption int) string {
-	confirmStyle := lipgloss.NewStyle().Foreground(components.ColorBright).Bold(true)
+	confirmStyle := lipgloss.NewStyle().Bold(true)
 
 	// Active YES button: black text on green background
 	yesActiveStyle := lipgloss.NewStyle().
@@ -1633,12 +1812,12 @@ func (m *Model) getActionShortcuts() string {
 	case types.TabImages:
 		sep := lipgloss.NewStyle().Foreground(components.ColorBorder).Render("│")
 		shortcuts = []string{
-			renderShortcut("S", "tart"),
+			renderShortcut("R", "un"),
 			renderShortcut("U", "pdate to latest"),
 			renderShortcut("I", "nspect"),
 			renderShortcut("D", "elete"),
 			sep,
-			renderShortcut("P", " Add image"),
+			renderShortcut("P", "ull image"),
 		}
 	case types.TabVolumes:
 		shortcuts = []string{
@@ -1652,10 +1831,13 @@ func (m *Model) getActionShortcuts() string {
 		}
 	case types.TabModels: // Docker Model Runner
 		shortcuts = []string{
-			renderShortcut("R", "un"),
-			renderShortcut("P", "ull model"),
+			renderShortcut("C", "hat"),
+			renderShortcut("R", "un (shell)"),
 			renderShortcut("I", "nspect"),
 			renderShortcut("D", "elete"),
+			lipgloss.NewStyle().Foreground(components.ColorBorder).Render("│"),
+			renderShortcut("P", "ull model"),
+			renderShortcut("Y", " Copy curl"),
 		}
 	}
 
@@ -1667,9 +1849,12 @@ func (m *Model) getActionShortcuts() string {
 	return strings.Join(shortcuts, " ")
 }
 
-// renderShortcut formats a keyboard shortcut with underscored first letter
+// renderShortcut formats a keyboard shortcut with the chord letter
+// underlined. The letter uses the terminal's default foreground + bold
+// (rather than ColorBright) so it stays visible even when the dark
+// palette has been loaded onto a light terminal.
 func renderShortcut(key string, rest ...string) string {
-	keyStyle := lipgloss.NewStyle().Foreground(components.ColorBright).Underline(true)
+	keyStyle := lipgloss.NewStyle().Bold(true).Underline(true)
 	textStyle := lipgloss.NewStyle().Foreground(components.ColorDim)
 
 	var b strings.Builder
@@ -1943,4 +2128,729 @@ func shortenTimeAgo(timeStr string) string {
 	s = strings.Replace(s, " years ago", "y ago", 1)
 	s = strings.Replace(s, " year ago", "y ago", 1)
 	return s
+}
+
+// --- Run image modal renders ---
+
+// renderRunModal renders the full-screen Run image form.
+//
+// Layout:
+//   Run image — repo:tag                              [TAB] Next  [Ctrl+R] Run  [ESC] Cancel
+//   ─────────
+//   Container name
+//   > _________________
+//
+//   Ports (host:container)
+//     8080:80
+//   > 3000:3000
+//
+//   Volumes
+//     data-vol -> /data
+//   > [+ Add volume]
+//
+//   Env vars (KEY=value)
+//     NODE_ENV=prod
+//   > FOO=bar
+//
+//   [ Run ]
+func (m *Model) renderRunModal() string {
+	var b strings.Builder
+
+	titleStyle := lipgloss.NewStyle().Bold(true)
+	helpStyle := lipgloss.NewStyle().Foreground(components.ColorNormal)
+	lineStyle := lipgloss.NewStyle().Foreground(components.ColorBorder)
+	dimStyle := lipgloss.NewStyle().Foreground(components.ColorDim)
+	normalStyle := lipgloss.NewStyle().Foreground(components.ColorNormal)
+	brightStyle := lipgloss.NewStyle().Bold(true)
+	focusStyle := lipgloss.NewStyle().Bold(true)
+	buttonStyle := lipgloss.NewStyle().
+		Background(components.ColorSelectedBg).
+		Foreground(components.ColorSelectedFg).
+		Bold(true).
+		Padding(0, 2)
+
+	// Header
+	imgRef := ""
+	if m.selectedImage != nil {
+		imgRef = m.selectedImage.Repository + ":" + m.selectedImage.Tag
+	}
+	header := "Run image — " + imgRef
+	right := "[TAB] Next  [ENTER] Add  [Ctrl+R] Run  [ESC] Cancel"
+	spacing := strings.Repeat(" ", max(1, m.width-len(header)-len(right)-4))
+	b.WriteString(titleStyle.Render(header))
+	b.WriteString(spacing)
+	b.WriteString(helpStyle.Render(right))
+	b.WriteString("\n")
+	b.WriteString(lineStyle.Render(strings.Repeat("─", m.width-2)))
+	b.WriteString("\n\n")
+
+	// --- Container name ---
+	b.WriteString(sectionLabel("Container name", m.runModalField == types.RunFieldName))
+	b.WriteString("\n")
+	b.WriteString(renderRunInput(m.runContainerName, "auto-generated if blank",
+		m.runModalField == types.RunFieldName, m.animationFrame))
+	b.WriteString("\n\n")
+
+	// --- Ports ---
+	b.WriteString(sectionLabel("Ports (host:container)", m.runModalField == types.RunFieldPortInput))
+	b.WriteString("\n")
+	for _, p := range m.runPorts {
+		b.WriteString("   ")
+		b.WriteString(normalStyle.Render(p.Host + ":" + p.Container))
+		b.WriteString("\n")
+	}
+	b.WriteString(renderRunInput(m.runPortInput, "e.g. 8080:80 then ENTER",
+		m.runModalField == types.RunFieldPortInput, m.animationFrame))
+	b.WriteString("\n\n")
+
+	// --- Volumes ---
+	b.WriteString(sectionLabel("Volumes", m.runModalField == types.RunFieldVolumeAdd))
+	b.WriteString("\n")
+	for _, v := range m.runVolumes {
+		src := v.Host
+		kind := "(bind)"
+		if v.IsNamed {
+			src = v.VolumeName
+			kind = "(volume)"
+		}
+		b.WriteString("   ")
+		b.WriteString(normalStyle.Render(src + " → " + v.Container))
+		b.WriteString(" ")
+		b.WriteString(dimStyle.Render(kind))
+		b.WriteString("\n")
+	}
+	addLabel := "[+ Add volume]"
+	if m.runModalField == types.RunFieldVolumeAdd {
+		b.WriteString(" > ")
+		b.WriteString(focusStyle.Render(addLabel))
+		b.WriteString(" ")
+		b.WriteString(dimStyle.Render("(ENTER opens picker)"))
+	} else {
+		b.WriteString("   ")
+		b.WriteString(dimStyle.Render(addLabel))
+	}
+	b.WriteString("\n\n")
+
+	// --- Env vars ---
+	b.WriteString(sectionLabel("Env vars (KEY=value)", m.runModalField == types.RunFieldEnvInput))
+	b.WriteString("\n")
+	for _, e := range m.runEnvVars {
+		b.WriteString("   ")
+		b.WriteString(normalStyle.Render(e.Key + "=" + e.Value))
+		b.WriteString("\n")
+	}
+	b.WriteString(renderRunInput(m.runEnvInput, "e.g. NODE_ENV=production then ENTER",
+		m.runModalField == types.RunFieldEnvInput, m.animationFrame))
+	b.WriteString("\n\n")
+
+	// --- Submit button ---
+	if m.runModalField == types.RunFieldSubmit {
+		b.WriteString(" > ")
+		b.WriteString(buttonStyle.Render("Run container"))
+		b.WriteString("  ")
+		b.WriteString(dimStyle.Render("(ENTER or Ctrl+R)"))
+	} else {
+		b.WriteString("   ")
+		b.WriteString(dimStyle.Render("[ Run container ] — Ctrl+R any time"))
+	}
+	b.WriteString("\n")
+
+	_ = brightStyle
+	return b.String()
+}
+
+// sectionLabel renders a section header with a focus indicator.
+func sectionLabel(label string, focused bool) string {
+	if focused {
+		return lipgloss.NewStyle().Bold(true).Render(" " + label)
+	}
+	return lipgloss.NewStyle().Foreground(components.ColorDim).Render(" " + label)
+}
+
+// renderRunInput renders an input row: a prompt "> " when focused (with a
+// blinking cursor), or a dim hint when unfocused.
+func renderRunInput(value, placeholder string, focused bool, frame int) string {
+	normalStyle := lipgloss.NewStyle().Foreground(components.ColorNormal)
+	dimStyle := lipgloss.NewStyle().Foreground(components.ColorDim)
+	brightStyle := lipgloss.NewStyle().Bold(true)
+
+	if !focused {
+		if value == "" {
+			return "   " + dimStyle.Render("(none)")
+		}
+		return "   " + normalStyle.Render(value)
+	}
+	prefix := " > "
+	cursor := "▌"
+	if frame%2 == 1 {
+		cursor = " "
+	}
+	if value == "" {
+		return prefix + dimStyle.Render(placeholder) + brightStyle.Render(cursor)
+	}
+	return prefix + normalStyle.Render(value) + brightStyle.Render(cursor)
+}
+
+// renderVolumePicker renders the volume-add sub-view.
+func (m *Model) renderVolumePicker() string {
+	var b strings.Builder
+	titleStyle := lipgloss.NewStyle().Bold(true)
+	helpStyle := lipgloss.NewStyle().Foreground(components.ColorNormal)
+	lineStyle := lipgloss.NewStyle().Foreground(components.ColorBorder)
+	dimStyle := lipgloss.NewStyle().Foreground(components.ColorDim)
+	normalStyle := lipgloss.NewStyle().Foreground(components.ColorNormal)
+	focusStyle := lipgloss.NewStyle().Bold(true)
+
+	header := "Add volume mount"
+	right := "[↑↓] Move  [ENTER] Select  [ESC] Back"
+	spacing := strings.Repeat(" ", max(1, m.width-len(header)-len(right)-4))
+	b.WriteString(titleStyle.Render(header))
+	b.WriteString(spacing)
+	b.WriteString(helpStyle.Render(right))
+	b.WriteString("\n")
+	b.WriteString(lineStyle.Render(strings.Repeat("─", m.width-2)))
+	b.WriteString("\n\n")
+
+	switch m.runVolumePickerMode {
+	case types.VolumePickerChoose:
+		options := []string{
+			"Select an existing volume",
+			"Create a new named volume",
+			"Bind mount (pick a host path)",
+		}
+		for i, opt := range options {
+			if i == m.runVolumePickerIndex {
+				b.WriteString(" > ")
+				b.WriteString(focusStyle.Render(opt))
+			} else {
+				b.WriteString("   ")
+				b.WriteString(normalStyle.Render(opt))
+			}
+			b.WriteString("\n")
+		}
+
+	case types.VolumePickerExisting:
+		listFocused := m.runVolumePickerSub == 0
+		pathFocused := m.runVolumePickerSub == 1
+		b.WriteString(sectionLabel("Available volumes", listFocused))
+		b.WriteString("\n")
+		if len(m.volumes) == 0 {
+			b.WriteString("   ")
+			b.WriteString(dimStyle.Render("(no volumes — press ESC and pick another option)"))
+			b.WriteString("\n")
+		} else {
+			pickedStyle := lipgloss.NewStyle().Bold(true)
+			for i, v := range m.volumes {
+				selected := i == m.runVolumePickerIndex
+				prefix := "   "
+				style := normalStyle
+				switch {
+				case selected && listFocused:
+					prefix = " > "
+					style = focusStyle
+				case selected:
+					prefix = " • "
+					style = pickedStyle
+				}
+				inUse := ""
+				if v.InUse {
+					inUse = dimStyle.Render(" (in use)")
+				}
+				b.WriteString(prefix)
+				b.WriteString(style.Render(v.Name))
+				b.WriteString(inUse)
+				b.WriteString("\n")
+			}
+		}
+		b.WriteString("\n")
+		b.WriteString(sectionLabel("Container mount path", pathFocused))
+		b.WriteString("\n")
+		b.WriteString(renderRunInput(m.runVolumeContInput, "e.g. /data", pathFocused, m.animationFrame))
+		b.WriteString("\n\n")
+		if listFocused {
+			b.WriteString(dimStyle.Render(" ↑/↓ to pick a volume, ENTER (or TAB) to set the path."))
+		} else {
+			b.WriteString(dimStyle.Render(" Type the path and press ENTER to attach. TAB to go back to list."))
+		}
+
+	case types.VolumePickerNew:
+		nameFocused := m.runVolumePickerSub == 0
+		contFocused := m.runVolumePickerSub == 1
+		b.WriteString(sectionLabel("New volume name", nameFocused))
+		b.WriteString("\n")
+		b.WriteString(renderRunInput(m.runVolumeNameInput, "e.g. my-data", nameFocused, m.animationFrame))
+		b.WriteString("\n\n")
+		b.WriteString(sectionLabel("Container mount path", contFocused))
+		b.WriteString("\n")
+		b.WriteString(renderRunInput(m.runVolumeContInput, "e.g. /data", contFocused, m.animationFrame))
+		b.WriteString("\n\n")
+		b.WriteString(dimStyle.Render(" Press TAB (or ENTER on name) to switch fields, ENTER on path to attach."))
+
+	case types.VolumePickerBind:
+		b.WriteString(sectionLabel("Host path", false))
+		b.WriteString("\n")
+		b.WriteString("   ")
+		b.WriteString(normalStyle.Render(m.runVolumeHostInput))
+		b.WriteString("\n\n")
+		b.WriteString(sectionLabel("Container mount path", true))
+		b.WriteString("\n")
+		b.WriteString(renderRunInput(m.runVolumeContInput, "e.g. /data", true, m.animationFrame))
+		b.WriteString("\n\n")
+		b.WriteString(dimStyle.Render(" Press ENTER to attach the bind mount."))
+	}
+
+	return b.String()
+}
+
+// renderFileBrowser renders the host-path picker.
+func (m *Model) renderFileBrowser() string {
+	var b strings.Builder
+	titleStyle := lipgloss.NewStyle().Bold(true)
+	helpStyle := lipgloss.NewStyle().Foreground(components.ColorNormal)
+	lineStyle := lipgloss.NewStyle().Foreground(components.ColorBorder)
+	dimStyle := lipgloss.NewStyle().Foreground(components.ColorDim)
+	normalStyle := lipgloss.NewStyle().Foreground(components.ColorNormal)
+	selectedStyle := lipgloss.NewStyle().
+		Background(components.ColorSelectedBg).
+		Foreground(components.ColorSelectedFg).
+		Bold(true)
+
+	header := "Choose host path"
+	right := "[↑↓] Move  [ENTER] Open  [F] Select dir  [ESC] Back"
+	spacing := strings.Repeat(" ", max(1, m.width-len(header)-len(right)-4))
+	b.WriteString(titleStyle.Render(header))
+	b.WriteString(spacing)
+	b.WriteString(helpStyle.Render(right))
+	b.WriteString("\n")
+	b.WriteString(lineStyle.Render(strings.Repeat("─", m.width-2)))
+	b.WriteString("\n")
+	b.WriteString(" ")
+	b.WriteString(dimStyle.Render("Path: "))
+	b.WriteString(normalStyle.Render(m.fileBrowserPath))
+	b.WriteString("\n\n")
+
+	// Show up to viewport-height entries.
+	visible := m.height - 8
+	if visible < 5 {
+		visible = 5
+	}
+	// Adjust scroll window around the selected row.
+	if m.fileBrowserIndex < m.fileBrowserScroll {
+		m.fileBrowserScroll = m.fileBrowserIndex
+	}
+	if m.fileBrowserIndex >= m.fileBrowserScroll+visible {
+		m.fileBrowserScroll = m.fileBrowserIndex - visible + 1
+	}
+	start := m.fileBrowserScroll
+	end := start + visible
+	if end > len(m.fileBrowserEntries) {
+		end = len(m.fileBrowserEntries)
+	}
+
+	for i := start; i < end; i++ {
+		entry := m.fileBrowserEntries[i]
+		isDir := strings.HasSuffix(entry, "/")
+		display := entry
+		if i == m.fileBrowserIndex {
+			b.WriteString(selectedStyle.Render(" " + padRightStr(display, m.width-4) + " "))
+		} else {
+			b.WriteString("  ")
+			if isDir {
+				b.WriteString(lipgloss.NewStyle().Bold(true).Render(display))
+			} else {
+				b.WriteString(normalStyle.Render(display))
+			}
+		}
+		b.WriteString("\n")
+	}
+
+	if len(m.fileBrowserEntries) > visible {
+		b.WriteString("\n")
+		b.WriteString(dimStyle.Render(fmt.Sprintf(" Showing %d-%d of %d", start+1, end, len(m.fileBrowserEntries))))
+	}
+
+	return b.String()
+}
+
+// --- Chat view ---
+
+// renderChatView renders a full-screen chat with the selected model.
+// Layout:
+//
+//   Chat — ai/qwen2.5-coder:7b-instruct-q4_K_M          [Ctrl+L] Clear  [ESC] Exit
+//   ──────────────────────────────────────────────────────────────────────────
+//   you ▎ Explain Go interfaces
+//   bot ▎ In Go, an interface is a type that ...
+//
+//   you ▎ <streaming>
+//   ...
+//
+//   > _____________________________________________
+func (m *Model) renderChatView() string {
+	var b strings.Builder
+
+	titleStyle := lipgloss.NewStyle().Bold(true)
+	helpStyle := lipgloss.NewStyle().Foreground(components.ColorNormal)
+	lineStyle := lipgloss.NewStyle().Foreground(components.ColorBorder)
+	dimStyle := lipgloss.NewStyle().Foreground(components.ColorDim)
+	normalStyle := lipgloss.NewStyle().Foreground(components.ColorNormal)
+	brightStyle := lipgloss.NewStyle().Bold(true)
+	userTag := lipgloss.NewStyle().Foreground(components.ColorHighlight).Bold(true).Render("you")
+	botTag := lipgloss.NewStyle().Bold(true).Render("bot")
+	errStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#FF4444"))
+
+	// Header
+	header := "Chat — " + m.chatModelRef
+	right := "[ENTER] Send  [Ctrl+L] Clear  [PgUp/PgDn] Scroll  [ESC] Exit"
+	spacing := strings.Repeat(" ", max(1, m.width-len(header)-len(right)-4))
+	b.WriteString(titleStyle.Render(header))
+	b.WriteString(spacing)
+	b.WriteString(helpStyle.Render(right))
+	b.WriteString("\n")
+	b.WriteString(lineStyle.Render(strings.Repeat("─", m.width-2)))
+	b.WriteString("\n\n")
+
+	// Transcript area
+	transcriptWidth := m.width - 8
+	if transcriptWidth < 30 {
+		transcriptWidth = 30
+	}
+
+	renderTurn := func(role, content string) {
+		tag := botTag
+		style := normalStyle
+		if role == "user" {
+			tag = userTag
+			style = brightStyle
+		}
+		// First line gets the tag, continuation lines get a blank.
+		lines := wrapLines(content, transcriptWidth)
+		for i, line := range lines {
+			if i == 0 {
+				b.WriteString(" ")
+				b.WriteString(tag)
+				b.WriteString(dimStyle.Render(" ▎ "))
+			} else {
+				b.WriteString("     " + dimStyle.Render("▎ "))
+			}
+			b.WriteString(style.Render(line))
+			b.WriteString("\n")
+		}
+		b.WriteString("\n")
+	}
+
+	for _, msg := range m.chatMessages {
+		renderTurn(msg.Role, msg.Content)
+	}
+	if m.chatStreaming || m.chatCurrentResponse != "" {
+		live := m.chatCurrentResponse
+		if m.chatStreaming {
+			frames := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+			live += " " + frames[m.animationFrame%len(frames)]
+		}
+		renderTurn("assistant", live)
+	}
+	if m.chatError != "" {
+		b.WriteString(" ")
+		b.WriteString(errStyle.Render("error: " + m.chatError))
+		b.WriteString("\n\n")
+	}
+
+	// Input row at the bottom
+	cursor := "▌"
+	if m.animationFrame%2 == 1 {
+		cursor = " "
+	}
+	inputBox := m.chatInput
+	if inputBox == "" {
+		inputBox = dimStyle.Render("type a message and press ENTER…")
+	} else {
+		inputBox = normalStyle.Render(inputBox)
+	}
+	b.WriteString(lineStyle.Render(strings.Repeat("─", m.width-2)))
+	b.WriteString("\n ")
+	if m.chatStreaming {
+		b.WriteString(dimStyle.Render("(generating — wait or ESC to cancel)"))
+	} else {
+		b.WriteString(brightStyle.Render("> "))
+		b.WriteString(inputBox)
+		b.WriteString(brightStyle.Render(cursor))
+	}
+	b.WriteString("\n")
+
+	return b.String()
+}
+
+// wrapLines splits s into lines no wider than w runes (rough — counts bytes,
+// good enough for monospace ASCII; multibyte glyphs may visually overflow).
+func wrapLines(s string, w int) []string {
+	if w < 10 {
+		w = 10
+	}
+	var out []string
+	for _, raw := range strings.Split(s, "\n") {
+		for len(raw) > w {
+			cut := w
+			// Try to break on a space within the last quarter of the window.
+			for i := w - 1; i > w*3/4; i-- {
+				if raw[i] == ' ' {
+					cut = i
+					break
+				}
+			}
+			out = append(out, raw[:cut])
+			raw = strings.TrimLeft(raw[cut:], " ")
+		}
+		out = append(out, raw)
+	}
+	if len(out) == 0 {
+		return []string{""}
+	}
+	return out
+}
+
+// renderModelsAPIPanel renders the DMR connection info — base URL,
+// selected model ref, and a copy-pasteable curl example. Rendered below
+// the model table so the action bar still sits at the bottom.
+//
+// Value text uses the terminal's default foreground + bold (no explicit
+// color) so it stays readable regardless of which palette is loaded —
+// otherwise ColorBright collapses to near-white on a light terminal.
+func (m *Model) renderModelsAPIPanel() string {
+	dimStyle := lipgloss.NewStyle().Foreground(components.ColorDim)
+	keyStyle := lipgloss.NewStyle().Foreground(components.ColorDim)
+	valStyle := lipgloss.NewStyle().Bold(true)
+	codeStyle := lipgloss.NewStyle()
+	lineStyle := lipgloss.NewStyle().Foreground(components.ColorBorder)
+
+	endpoint := m.dmr.ChatEndpoint()
+	modelRef := m.currentModelRef()
+	if modelRef == "" {
+		modelRef = "(select a model)"
+	}
+	curl := m.currentCurlExample()
+
+	var b strings.Builder
+	b.WriteString(lineStyle.Render(strings.Repeat("─", m.width-2)))
+	b.WriteString("\n")
+	b.WriteString(" ")
+	b.WriteString(keyStyle.Render("API:   "))
+	b.WriteString(valStyle.Render(endpoint))
+	b.WriteString("  ")
+	b.WriteString(dimStyle.Render("(OpenAI-compatible)"))
+	b.WriteString("\n ")
+	b.WriteString(keyStyle.Render("Model: "))
+	b.WriteString(valStyle.Render(modelRef))
+	b.WriteString("\n ")
+	b.WriteString(keyStyle.Render("curl:  "))
+	// Truncate curl to terminal width so it doesn't blow up the layout.
+	// Reserve a few extra cols for the trailing "(Y to copy)" hint.
+	maxCurl := m.width - 22
+	if maxCurl < 30 {
+		maxCurl = 30
+	}
+	if len(curl) > maxCurl {
+		curl = curl[:maxCurl-1] + "…"
+	}
+	b.WriteString(codeStyle.Render(curl))
+	b.WriteString("  ")
+	b.WriteString(dimStyle.Render("(Y to copy)"))
+	b.WriteString("\n")
+	return b.String()
+}
+
+// renderTagPicker renders the intermediate "choose a variant" screen
+// shown after the user picks a model repo from search results. Lists the
+// available tags with parsed parameters / quantization / size.
+func (m *Model) renderTagPicker() string {
+	var b strings.Builder
+
+	titleStyle := lipgloss.NewStyle().Bold(true)
+	helpStyle := lipgloss.NewStyle().Foreground(components.ColorNormal)
+	lineStyle := lipgloss.NewStyle().Foreground(components.ColorBorder)
+	dimStyle := lipgloss.NewStyle().Foreground(components.ColorDim)
+	normalStyle := lipgloss.NewStyle().Foreground(components.ColorNormal)
+	selectedStyle := lipgloss.NewStyle().
+		Background(components.ColorSelectedBg).
+		Foreground(components.ColorSelectedFg).
+		Bold(true)
+	errStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#FF4444"))
+
+	header := "Choose a variant — " + m.tagPickerRepo
+	right := "[↑↓] Move  [ENTER] Pull this tag  [ESC] Back"
+	spacing := strings.Repeat(" ", max(1, m.width-len(header)-len(right)-4))
+	b.WriteString(titleStyle.Render(header))
+	b.WriteString(spacing)
+	b.WriteString(helpStyle.Render(right))
+	b.WriteString("\n")
+	b.WriteString(lineStyle.Render(strings.Repeat("─", m.width-2)))
+	b.WriteString("\n")
+
+	if m.tagPickerLoading {
+		b.WriteString("\n ")
+		frames := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+		b.WriteString(dimStyle.Render(frames[m.animationFrame%len(frames)] + " Loading tags…"))
+		b.WriteString("\n")
+		return b.String()
+	}
+	if m.tagPickerError != "" {
+		b.WriteString("\n ")
+		b.WriteString(errStyle.Render(m.tagPickerError))
+		b.WriteString("\n")
+		return b.String()
+	}
+	if len(m.tagPickerTags) == 0 {
+		b.WriteString("\n ")
+		b.WriteString(dimStyle.Render("No tags available."))
+		b.WriteString("\n")
+		return b.String()
+	}
+
+	// Layout: TAG (fill) | PARAMS (6) | QUANT (10) | SIZE (10) | UPDATED (12)
+	totalW := m.width - 6
+	paramW, quantW, sizeW, updW := 6, 10, 10, 12
+	tagW := totalW - paramW - quantW - sizeW - updW - 8
+	if tagW < 20 {
+		tagW = 20
+	}
+
+	header2 := " " + padRightStr("TAG", tagW) + "  " +
+		padRightStr("PARAMS", paramW) + "  " +
+		padRightStr("QUANT", quantW) + "  " +
+		padRightStr("SIZE", sizeW) + "  " +
+		padRightStr("UPDATED", updW)
+	b.WriteString(dimStyle.Render(header2))
+	b.WriteString("\n")
+
+	visible := m.tagPickerViewportHeight()
+	start := m.tagPickerScroll
+	end := start + visible
+	if end > len(m.tagPickerTags) {
+		end = len(m.tagPickerTags)
+	}
+
+	for i := start; i < end; i++ {
+		t := m.tagPickerTags[i]
+		row := " " + padRightStr(truncateWithEllipsis(t.Tag, tagW), tagW) + "  " +
+			padRightStr(defaultStr(t.Parameters, "--"), paramW) + "  " +
+			padRightStr(defaultStr(t.Quant, "--"), quantW) + "  " +
+			padRightStr(defaultStr(t.Size, "--"), sizeW) + "  " +
+			padRightStr(defaultStr(t.Updated, "--"), updW)
+		if i == m.tagPickerIndex {
+			b.WriteString(selectedStyle.Render(row))
+		} else {
+			b.WriteString(normalStyle.Render(row))
+		}
+		b.WriteString("\n")
+	}
+
+	if len(m.tagPickerTags) > visible {
+		b.WriteString("\n ")
+		b.WriteString(dimStyle.Render(fmt.Sprintf("Showing %d-%d of %d",
+			start+1, end, len(m.tagPickerTags))))
+	}
+	return b.String()
+}
+
+// currentModelRef returns the highlighted model's repo:tag, or "" if none.
+func (m *Model) currentModelRef() string {
+	if m.selectedRow >= len(m.models) {
+		return ""
+	}
+	return m.models[m.selectedRow].Repository + ":" + m.models[m.selectedRow].Tag
+}
+
+// currentCurlExample builds the curl snippet shown in the API panel /
+// copied to the clipboard via Y.
+func (m *Model) currentCurlExample() string {
+	ref := m.currentModelRef()
+	if ref == "" {
+		ref = "<model>"
+	}
+	return "curl -s " + m.dmr.ChatEndpoint() +
+		" -H 'Content-Type: application/json'" +
+		" -d '{\"model\":\"" + ref + "\",\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}]}'"
+}
+
+// togglableColumnsForTab returns the columns the user can toggle on the
+// active tab via the V picker. Order matches the columns' position in
+// the rendered table so the picker reads top-to-bottom = left-to-right.
+func togglableColumnsForTab(tab int) []types.ColumnDef {
+	switch tab {
+	case types.TabContainers:
+		return []types.ColumnDef{
+			{Key: "status", Label: "Status"},
+			{Key: "cpu", Label: "CPU"},
+			{Key: "mem", Label: "Memory"},
+			{Key: "image", Label: "Image"},
+			{Key: "ports", Label: "Ports"},
+		}
+	case types.TabImages:
+		return []types.ColumnDef{
+			{Key: "status", Label: "Status"},
+			{Key: "size", Label: "Size"},
+			{Key: "created", Label: "Created"},
+		}
+	case types.TabModels:
+		return []types.ColumnDef{
+			{Key: "status", Label: "Status"},
+			{Key: "params", Label: "Parameters"},
+			{Key: "quant", Label: "Quantization"},
+			{Key: "size", Label: "Size"},
+		}
+	case types.TabVolumes:
+		return []types.ColumnDef{
+			{Key: "containers", Label: "Used by (containers)"},
+			{Key: "mountpoint", Label: "Mount point"},
+		}
+	case types.TabNetworks:
+		return []types.ColumnDef{
+			{Key: "containers", Label: "Containers"},
+			{Key: "driver", Label: "Driver"},
+			{Key: "scope", Label: "Scope"},
+			{Key: "ipv4", Label: "IPv4"},
+		}
+	}
+	return nil
+}
+
+// renderColumnPicker renders the V overlay listing togglable columns for
+// the active tab with a checkbox each. ↑/↓ moves the cursor, Space (or
+// Enter) toggles, V/ESC closes.
+func (m *Model) renderColumnPicker() string {
+	var b strings.Builder
+
+	titleStyle := lipgloss.NewStyle().Bold(true).Underline(true)
+	dimStyle := lipgloss.NewStyle().Foreground(components.ColorDim)
+	focusStyle := lipgloss.NewStyle().Bold(true)
+
+	cols := togglableColumnsForTab(m.activeTab)
+	b.WriteString(titleStyle.Render(" Columns"))
+	b.WriteString("\n")
+	b.WriteString(dimStyle.Render(" Space/Enter toggles, V or ESC closes"))
+	b.WriteString("\n\n")
+
+	if len(cols) == 0 {
+		b.WriteString("  ")
+		b.WriteString(dimStyle.Render("(nothing to toggle on this tab)"))
+		b.WriteString("\n")
+		return b.String()
+	}
+	for i, c := range cols {
+		mark := "[ ]"
+		if m.IsColumnVisible(c.Key) {
+			mark = "[x]"
+		}
+		row := "  " + mark + "  " + c.Label
+		if i == m.columnPickerCursor {
+			b.WriteString(" > ")
+			b.WriteString(focusStyle.Render(row[2:]))
+		} else {
+			b.WriteString(row)
+		}
+		b.WriteString("\n")
+	}
+	b.WriteString("\n")
+	b.WriteString(dimStyle.Render(" Tip: set TINYD_HIDE_COLS=status,size to persist defaults across runs."))
+	return b.String()
 }

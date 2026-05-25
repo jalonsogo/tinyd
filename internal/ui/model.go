@@ -2,6 +2,9 @@
 package ui
 
 import (
+	"bufio"
+	"io"
+	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -77,18 +80,60 @@ type Model struct {
 	selectedFilter  int
 
 	// Run image modal
-	runContainerName   string
-	runPortHost        string
-	runPortContainer   string
-	runPorts           []types.PortMapping
-	runVolumes         []types.VolumeMapping
-	runEnvVars         []types.EnvVar
-	runSelectedVolume  string
-	runVolumeHost      string
-	runVolumeContainer string
-	runEnvKey          string
-	runEnvValue        string
-	runModalField      int
+	runContainerName string
+	runPorts         []types.PortMapping
+	runVolumes       []types.VolumeMapping
+	runEnvVars       []types.EnvVar
+
+	// Current input rows (bottom row of each list — Enter commits to the
+	// list above and clears the field).
+	runPortInput string // "8080:80"
+	runEnvInput  string // "KEY=value"
+
+	// Which input field has focus (see RunField* in types).
+	runModalField int
+
+	// Volume picker sub-view state. runVolumePickerMode toggles between
+	// the type-chooser and the type-specific input.
+	runVolumePickerMode  int // VolumePickerChoose / Existing / New / Bind
+	runVolumePickerIndex int // cursor in the chooser / existing list
+	runVolumePickerSub   int // 0 = primary cursor, 1 = container-path input
+	runVolumeNameInput   string
+	runVolumeHostInput   string // for bind mount
+	runVolumeContInput   string // container path
+
+	// File browser state — used when configuring a bind mount.
+	fileBrowserPath    string   // current directory
+	fileBrowserEntries []string // sorted entries (dirs end with /)
+	fileBrowserIndex   int
+	fileBrowserScroll  int
+
+	// Column visibility — keys correspond to togglable column labels
+	// (e.g. "status", "cpu", "mem"). Initialised from TINYD_HIDE_COLS or
+	// hard defaults; mutated at runtime via the V column picker overlay.
+	hiddenColumns      map[string]bool
+	showColumnPicker   bool
+	columnPickerCursor int
+
+	// Model tag picker (intermediate screen between "select repo" in the
+	// model-pull search results and the actual pull).
+	tagPickerRepo    string
+	tagPickerTags    []types.ModelTagInfo
+	tagPickerIndex   int
+	tagPickerScroll  int
+	tagPickerLoading bool
+	tagPickerError   string
+
+	// Chat with a DMR model.
+	chatModelRef        string              // repo:tag the chat targets
+	chatMessages        []types.ChatMessage // committed conversation history
+	chatInput           string              // current user input
+	chatStreaming       bool                // true while the assistant is generating
+	chatCurrentResponse string              // tokens received so far for the in-flight reply
+	chatError           string              // surfaced once on a stream failure
+	chatScrollOffset    int                 // viewport scroll position in the transcript
+	chatReader          *bufio.Reader       // live SSE reader while streaming
+	chatBody            io.Closer           // underlying body to close at end of stream
 
 	// Pull image modal
 	pullImageName string
@@ -120,8 +165,9 @@ type Model struct {
 
 // NewModel creates an initial model with default state. version is the build
 // version (set via -ldflags in releases, "dev" otherwise) and is shown in
-// the header.
-func NewModel(version string) (*Model, error) {
+// the header. hidden is the initial set of hidden column keys (typically
+// derived from TINYD_HIDE_COLS in main).
+func NewModel(version string, hidden map[string]bool) (*Model, error) {
 	// Create Docker client
 	dockerClient, err := docker.NewClient()
 	if err != nil {
@@ -164,7 +210,32 @@ func NewModel(version string) (*Model, error) {
 		runPorts:   []types.PortMapping{},
 		runVolumes: []types.VolumeMapping{},
 		runEnvVars: []types.EnvVar{},
+
+		hiddenColumns: hidden,
 	}, nil
+}
+
+// IsColumnVisible reports whether a given column key should render. Empty
+// keys are always visible (used for fixed columns like the status dot or
+// NAME / REPOSITORY:TAG which can't be hidden).
+func (m *Model) IsColumnVisible(key string) bool {
+	if key == "" {
+		return true
+	}
+	return !m.hiddenColumns[strings.ToLower(key)]
+}
+
+// ToggleColumn flips the visibility of a column key.
+func (m *Model) ToggleColumn(key string) {
+	if m.hiddenColumns == nil {
+		m.hiddenColumns = map[string]bool{}
+	}
+	key = strings.ToLower(key)
+	if m.hiddenColumns[key] {
+		delete(m.hiddenColumns, key)
+	} else {
+		m.hiddenColumns[key] = true
+	}
 }
 
 // Init initializes the model and fetches initial data

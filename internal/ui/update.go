@@ -1,6 +1,11 @@
 package ui
 
 import (
+	"bufio"
+	"io"
+	"os"
+	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -155,6 +160,51 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.pullStage = 2
 		return m, nil
 
+	case types.ModelTagsMsg:
+		m.tagPickerLoading = false
+		if msg.Repo != m.tagPickerRepo {
+			// Late response — user picked a different repo or backed out.
+			return m, nil
+		}
+		m.tagPickerTags = msg.Tags
+		m.tagPickerIndex = 0
+		m.tagPickerScroll = 0
+		return m, nil
+
+	case types.ChatStartedMsg:
+		// Store the live reader/body on the model and kick off the
+		// chunk-reading loop. Cast back from interface{} (types/ keeps
+		// the message struct free of bufio/io imports).
+		if r, ok := msg.Reader.(*bufio.Reader); ok {
+			m.chatReader = r
+		}
+		if b, ok := msg.Body.(io.Closer); ok {
+			m.chatBody = b
+		}
+		return m, m.readChatChunkCmd()
+
+	case types.ChatTokenMsg:
+		if msg.Err != "" {
+			m.closeChatStream()
+			m.chatError = msg.Err
+			m.chatStreaming = false
+			return m, nil
+		}
+		if msg.Done {
+			// Commit the assistant message and reset live state.
+			if m.chatCurrentResponse != "" {
+				m.chatMessages = append(m.chatMessages, types.ChatMessage{
+					Role: "assistant", Content: m.chatCurrentResponse,
+				})
+			}
+			m.chatCurrentResponse = ""
+			m.chatStreaming = false
+			m.closeChatStream()
+			return m, nil
+		}
+		m.chatCurrentResponse += msg.Token
+		return m, m.readChatChunkCmd()
+
 	case types.TickMsg:
 		// Refresh data periodically (only if no action in progress)
 		if !m.actionInProgress {
@@ -243,16 +293,25 @@ func (m *Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	}
 
-	// Global keys (work in all modes)
-	switch key {
-	case "H", "?":
-		m.showHelp = !m.showHelp
-		return m, nil
-	case "esc":
-		if m.showHelp {
-			m.showHelp = false
+	// Global keys (work in all modes). The help toggle is skipped in
+	// text-input views so typing "Hello", "?", etc. doesn't trigger it.
+	inputView := m.currentView == types.ViewModeChat ||
+		m.currentView == types.ViewModeRunImage ||
+		m.currentView == types.ViewModeRunVolumePicker ||
+		m.currentView == types.ViewModePullImage ||
+		m.currentView == types.ViewModePullModel ||
+		(m.currentView == types.ViewModeList && m.listSearchMode)
+
+	if !inputView {
+		switch key {
+		case "H", "?":
+			m.showHelp = !m.showHelp
 			return m, nil
 		}
+	}
+	if key == "esc" && m.showHelp {
+		m.showHelp = false
+		return m, nil
 	}
 
 	// Route to appropriate handler based on view
@@ -265,6 +324,16 @@ func (m *Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleInspectViewKeys(msg)
 	case types.ViewModePullImage, types.ViewModePullModel:
 		return m.handlePullViewKeys(msg)
+	case types.ViewModeRunImage:
+		return m.handleRunModalKeys(msg)
+	case types.ViewModeRunVolumePicker:
+		return m.handleVolumePickerKeys(msg)
+	case types.ViewModeRunFileBrowser:
+		return m.handleFileBrowserKeys(msg)
+	case types.ViewModeChat:
+		return m.handleChatViewKeys(msg)
+	case types.ViewModeModelTagPicker:
+		return m.handleTagPickerKeys(msg)
 	default:
 		return m, nil
 	}
@@ -340,6 +409,34 @@ func (m *Model) handleListViewKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	// Column-picker overlay: arrow keys move the cursor, Space/Enter
+	// toggle, V/ESC close. Other keys are swallowed so they don't
+	// accidentally start an action behind the overlay.
+	if m.showColumnPicker {
+		cols := togglableColumnsForTab(m.activeTab)
+		switch key {
+		case "esc", "v", "V":
+			m.showColumnPicker = false
+			return m, nil
+		case "up", "k":
+			if m.columnPickerCursor > 0 {
+				m.columnPickerCursor--
+			}
+			return m, nil
+		case "down", "j":
+			if m.columnPickerCursor < len(cols)-1 {
+				m.columnPickerCursor++
+			}
+			return m, nil
+		case " ", "enter":
+			if m.columnPickerCursor < len(cols) {
+				m.ToggleColumn(cols[m.columnPickerCursor].Key)
+			}
+			return m, nil
+		}
+		return m, nil
+	}
+
 	switch key {
 	// Navigation — always allowed, even while an action is in progress
 	case "up", "k":
@@ -392,8 +489,6 @@ func (m *Model) handleListViewKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "s", "S":
 		if m.activeTab == types.TabContainers {
 			return m.handleContainerStartStop()
-		} else if m.activeTab == types.TabImages {
-			return m.handleImageStart()
 		}
 		return m, nil
 	case "l", "L":
@@ -444,12 +539,61 @@ func (m *Model) handleListViewKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case "r", "R":
+	case "r":
 		if m.activeTab == types.TabContainers {
 			return m.handleContainerRestart()
 		}
+		if m.activeTab == types.TabImages {
+			return m.handleImageStart()
+		}
+		if m.activeTab == types.TabModels {
+			// Plain r on Models is the shell REPL fallback (same key as
+			// Shift+R, kept for muscle memory). The in-app chat lives on c.
+			return m.handleModelRun()
+		}
+		return m, nil
+	case "R":
+		if m.activeTab == types.TabContainers {
+			return m.handleContainerRestart()
+		}
+		if m.activeTab == types.TabImages {
+			return m.handleImageStart()
+		}
 		if m.activeTab == types.TabModels {
 			return m.handleModelRun()
+		}
+		return m, nil
+	case "c", "C":
+		if m.activeTab == types.TabModels {
+			return m.handleModelChat()
+		}
+		return m, nil
+
+	case "u", "U":
+		if m.activeTab == types.TabImages {
+			return m.handleImageUpdate()
+		}
+		return m, nil
+
+	case "y", "Y":
+		// Yank the curl example to the clipboard. Models tab only.
+		if m.activeTab == types.TabModels {
+			curl := m.currentCurlExample()
+			return m, m.copyToClipboardCmd(curl, "curl example")
+		}
+		return m, nil
+
+	case "v", "V":
+		// Toggle the column-visibility picker overlay. Reset the
+		// cursor to the first togglable column each open so picker
+		// state doesn't leak across tabs with different column lists.
+		if !m.showColumnPicker {
+			m.columnPickerCursor = 0
+		}
+		m.showColumnPicker = !m.showColumnPicker
+		// If help was open, close it so only one overlay shows at a time.
+		if m.showColumnPicker && m.showHelp {
+			m.showHelp = false
 		}
 		return m, nil
 
@@ -670,9 +814,18 @@ func (m *Model) handleImageStart() (tea.Model, tea.Cmd) {
 	image := m.images[m.selectedRow]
 	m.selectedImage = &image
 
-	// Start the image (create and run a container from it)
-	// For now, use simple defaults - can be expanded to a modal later
-	return m, m.runContainerCmd()
+	// Open the interactive Run modal — user fills in name/ports/volumes/env
+	// then Ctrl+R submits.
+	m.currentView = types.ViewModeRunImage
+	m.runContainerName = ""
+	m.runPorts = []types.PortMapping{}
+	m.runVolumes = []types.VolumeMapping{}
+	m.runEnvVars = []types.EnvVar{}
+	m.runPortInput = ""
+	m.runEnvInput = ""
+	m.runModalField = types.RunFieldName
+	m.statusMessage = ""
+	return m, nil
 }
 
 func (m *Model) handleImageInspect() (tea.Model, tea.Cmd) {
@@ -844,13 +997,17 @@ func (m *Model) handlePullViewKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			img := m.pullSearchResults[m.pullSearchSelected]
+
+			// Models: detour through the tag picker so the user can choose
+			// a specific quantization variant. Images: pull immediately.
+			if m.currentView == types.ViewModePullModel {
+				return m.openModelTagPicker(img.Name)
+			}
+
 			m.pullStage = 3
 			m.pullingImageName = img.Name
 			m.actionInProgress = true
 			m.statusMessage = "Pulling " + img.Name + "..."
-			if m.currentView == types.ViewModePullModel {
-				return m, m.pullModelCmd(img.Name)
-			}
 			return m, m.pullSearchCompleteCmd(img.Name)
 		}
 		return m, nil
@@ -916,4 +1073,605 @@ func (m *Model) handleNetworkDelete() (tea.Model, tea.Cmd) {
 	m.deleteConfirmMode = !m.deleteConfirmMode
 	m.deleteConfirmOption = 1 // Default to "No"
 	return m, nil
+}
+
+// --- Run image modal ---
+
+// handleRunModalKeys handles input in the Run image modal (full-screen form).
+// TAB/Shift-TAB cycles fields, Enter commits the current input row to its
+// list (or runs when on Submit), Ctrl+R runs from anywhere, Esc cancels.
+func (m *Model) handleRunModalKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	key := msg.String()
+
+	switch key {
+	case "esc":
+		m.currentView = types.ViewModeList
+		return m, nil
+	case "ctrl+r":
+		return m.submitRunModal()
+	case "tab", "down":
+		m.runModalField = (m.runModalField + 1) % types.RunFieldCount
+		return m, nil
+	case "shift+tab", "up":
+		m.runModalField = (m.runModalField + types.RunFieldCount - 1) % types.RunFieldCount
+		return m, nil
+	case "enter":
+		switch m.runModalField {
+		case types.RunFieldPortInput:
+			if p, ok := parsePortMapping(m.runPortInput); ok {
+				m.runPorts = append(m.runPorts, p)
+				m.runPortInput = ""
+			}
+			return m, nil
+		case types.RunFieldEnvInput:
+			if e, ok := parseEnvVar(m.runEnvInput); ok {
+				m.runEnvVars = append(m.runEnvVars, e)
+				m.runEnvInput = ""
+			}
+			return m, nil
+		case types.RunFieldVolumeAdd:
+			return m.openVolumePicker()
+		case types.RunFieldSubmit:
+			return m.submitRunModal()
+		}
+		return m, nil
+	case "backspace":
+		// On an empty input row, remove the last committed entry from the
+		// list above (shell-style line erase).
+		switch m.runModalField {
+		case types.RunFieldName:
+			if len(m.runContainerName) > 0 {
+				m.runContainerName = m.runContainerName[:len(m.runContainerName)-1]
+			}
+		case types.RunFieldPortInput:
+			if m.runPortInput == "" && len(m.runPorts) > 0 {
+				m.runPorts = m.runPorts[:len(m.runPorts)-1]
+			} else if len(m.runPortInput) > 0 {
+				m.runPortInput = m.runPortInput[:len(m.runPortInput)-1]
+			}
+		case types.RunFieldEnvInput:
+			if m.runEnvInput == "" && len(m.runEnvVars) > 0 {
+				m.runEnvVars = m.runEnvVars[:len(m.runEnvVars)-1]
+			} else if len(m.runEnvInput) > 0 {
+				m.runEnvInput = m.runEnvInput[:len(m.runEnvInput)-1]
+			}
+		case types.RunFieldVolumeAdd:
+			if len(m.runVolumes) > 0 {
+				m.runVolumes = m.runVolumes[:len(m.runVolumes)-1]
+			}
+		}
+		return m, nil
+	}
+
+	// Printable character → append to focused field's input.
+	if len(key) == 1 && key[0] >= 32 && key[0] < 127 {
+		switch m.runModalField {
+		case types.RunFieldName:
+			m.runContainerName += key
+		case types.RunFieldPortInput:
+			m.runPortInput += key
+		case types.RunFieldEnvInput:
+			m.runEnvInput += key
+		}
+	}
+	return m, nil
+}
+
+func (m *Model) submitRunModal() (tea.Model, tea.Cmd) {
+	// Commit any partially-typed input rows so users don't lose them.
+	if p, ok := parsePortMapping(m.runPortInput); ok {
+		m.runPorts = append(m.runPorts, p)
+		m.runPortInput = ""
+	}
+	if e, ok := parseEnvVar(m.runEnvInput); ok {
+		m.runEnvVars = append(m.runEnvVars, e)
+		m.runEnvInput = ""
+	}
+	m.currentView = types.ViewModeList
+	m.actionLabel = "Running " + m.selectedImage.Repository + ":" + m.selectedImage.Tag
+	m.statusMessage = "Starting container..."
+	return m, m.runContainerCmd()
+}
+
+// parsePortMapping parses "host:container" (e.g. "8080:80"). Both halves
+// must be present and non-empty; whitespace is trimmed.
+func parsePortMapping(s string) (types.PortMapping, bool) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return types.PortMapping{}, false
+	}
+	parts := strings.SplitN(s, ":", 2)
+	if len(parts) != 2 {
+		return types.PortMapping{}, false
+	}
+	host := strings.TrimSpace(parts[0])
+	cont := strings.TrimSpace(parts[1])
+	if host == "" || cont == "" {
+		return types.PortMapping{}, false
+	}
+	return types.PortMapping{Host: host, Container: cont}, true
+}
+
+// parseEnvVar parses "KEY=value". Value may be empty; key may not.
+func parseEnvVar(s string) (types.EnvVar, bool) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return types.EnvVar{}, false
+	}
+	parts := strings.SplitN(s, "=", 2)
+	if len(parts) < 1 || parts[0] == "" {
+		return types.EnvVar{}, false
+	}
+	value := ""
+	if len(parts) == 2 {
+		value = parts[1]
+	}
+	return types.EnvVar{Key: parts[0], Value: value}, true
+}
+
+// --- Volume picker (sub-view of Run modal) ---
+
+func (m *Model) openVolumePicker() (tea.Model, tea.Cmd) {
+	m.currentView = types.ViewModeRunVolumePicker
+	m.runVolumePickerMode = types.VolumePickerChoose
+	m.runVolumePickerIndex = 0
+	m.runVolumePickerSub = 0
+	m.runVolumeNameInput = ""
+	m.runVolumeHostInput = ""
+	m.runVolumeContInput = ""
+	return m, nil
+}
+
+func (m *Model) handleVolumePickerKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	key := msg.String()
+
+	if key == "esc" {
+		// Back to the Run modal — drop without committing.
+		m.currentView = types.ViewModeRunImage
+		return m, nil
+	}
+
+	switch m.runVolumePickerMode {
+	case types.VolumePickerChoose:
+		return m.handleVolumePickerChoose(key)
+	case types.VolumePickerExisting:
+		return m.handleVolumePickerExisting(key)
+	case types.VolumePickerNew:
+		return m.handleVolumePickerNew(key)
+	case types.VolumePickerBind:
+		// Bind mode is the "container path" step after picking a host
+		// path in the file browser.
+		return m.handleVolumePickerBind(key)
+	}
+	return m, nil
+}
+
+func (m *Model) handleVolumePickerChoose(key string) (tea.Model, tea.Cmd) {
+	options := 3 // existing / new / bind
+	switch key {
+	case "up", "k":
+		if m.runVolumePickerIndex > 0 {
+			m.runVolumePickerIndex--
+		}
+	case "down", "j":
+		if m.runVolumePickerIndex < options-1 {
+			m.runVolumePickerIndex++
+		}
+	case "enter":
+		switch m.runVolumePickerIndex {
+		case 0: // existing
+			m.runVolumePickerMode = types.VolumePickerExisting
+			m.runVolumePickerIndex = 0
+			m.runVolumePickerSub = 0 // start with focus on the volume list
+			m.runVolumeContInput = ""
+		case 1: // new
+			m.runVolumePickerMode = types.VolumePickerNew
+			m.runVolumePickerSub = 0 // start with focus on the name field
+			m.runVolumeNameInput = ""
+			m.runVolumeContInput = ""
+		case 2: // bind
+			return m.openFileBrowser()
+		}
+	}
+	return m, nil
+}
+
+// handleVolumePickerExisting drives a two-stage flow: first pick a volume
+// from the list (sub=0), then type the container mount path (sub=1). TAB
+// toggles focus, Enter on the list advances to the path step, Enter on the
+// path commits the mapping.
+func (m *Model) handleVolumePickerExisting(key string) (tea.Model, tea.Cmd) {
+	if len(m.volumes) == 0 {
+		if key == "enter" || key == "esc" {
+			m.runVolumePickerMode = types.VolumePickerChoose
+			m.runVolumePickerSub = 0
+		}
+		return m, nil
+	}
+
+	// Shared: TAB toggles between list and path field.
+	if key == "tab" || key == "shift+tab" {
+		m.runVolumePickerSub = 1 - m.runVolumePickerSub
+		return m, nil
+	}
+
+	if m.runVolumePickerSub == 0 {
+		// Stage 1: picking the volume.
+		switch key {
+		case "up", "k":
+			if m.runVolumePickerIndex > 0 {
+				m.runVolumePickerIndex--
+			}
+		case "down", "j":
+			if m.runVolumePickerIndex < len(m.volumes)-1 {
+				m.runVolumePickerIndex++
+			}
+		case "enter":
+			// Advance to path entry.
+			m.runVolumePickerSub = 1
+		}
+		return m, nil
+	}
+
+	// Stage 2: typing the container path.
+	switch key {
+	case "enter":
+		cont := strings.TrimSpace(m.runVolumeContInput)
+		if cont == "" {
+			return m, nil
+		}
+		v := m.volumes[m.runVolumePickerIndex]
+		m.runVolumes = append(m.runVolumes, types.VolumeMapping{
+			IsNamed:    true,
+			VolumeName: v.Name,
+			Container:  cont,
+		})
+		m.currentView = types.ViewModeRunImage
+		return m, nil
+	case "backspace":
+		if len(m.runVolumeContInput) > 0 {
+			m.runVolumeContInput = m.runVolumeContInput[:len(m.runVolumeContInput)-1]
+		}
+	default:
+		if len(key) == 1 && key[0] >= 32 && key[0] < 127 {
+			m.runVolumeContInput += key
+		}
+	}
+	return m, nil
+}
+
+func (m *Model) handleVolumePickerNew(key string) (tea.Model, tea.Cmd) {
+	// Two fields tracked by runVolumePickerSub: 0 = name, 1 = container path.
+	switch key {
+	case "tab", "shift+tab", "down", "up":
+		m.runVolumePickerSub = 1 - m.runVolumePickerSub
+	case "enter":
+		// On name field, Enter advances to path; on path field, Enter commits.
+		if m.runVolumePickerSub == 0 {
+			if strings.TrimSpace(m.runVolumeNameInput) == "" {
+				return m, nil
+			}
+			m.runVolumePickerSub = 1
+			return m, nil
+		}
+		name := strings.TrimSpace(m.runVolumeNameInput)
+		cont := strings.TrimSpace(m.runVolumeContInput)
+		if name == "" || cont == "" {
+			return m, nil
+		}
+		m.runVolumes = append(m.runVolumes, types.VolumeMapping{
+			IsNamed:    true,
+			VolumeName: name,
+			Container:  cont,
+		})
+		m.currentView = types.ViewModeRunImage
+		return m, nil
+	case "backspace":
+		if m.runVolumePickerSub == 0 && len(m.runVolumeNameInput) > 0 {
+			m.runVolumeNameInput = m.runVolumeNameInput[:len(m.runVolumeNameInput)-1]
+		} else if m.runVolumePickerSub == 1 && len(m.runVolumeContInput) > 0 {
+			m.runVolumeContInput = m.runVolumeContInput[:len(m.runVolumeContInput)-1]
+		}
+	default:
+		if len(key) == 1 && key[0] >= 32 && key[0] < 127 {
+			if m.runVolumePickerSub == 0 {
+				m.runVolumeNameInput += key
+			} else {
+				m.runVolumeContInput += key
+			}
+		}
+	}
+	return m, nil
+}
+
+// handleVolumePickerBind is the post-file-browser step: prompts for the
+// container path. The host path was set by the file browser into
+// runVolumeHostInput.
+func (m *Model) handleVolumePickerBind(key string) (tea.Model, tea.Cmd) {
+	switch key {
+	case "enter":
+		cont := strings.TrimSpace(m.runVolumeContInput)
+		if cont == "" {
+			return m, nil
+		}
+		m.runVolumes = append(m.runVolumes, types.VolumeMapping{
+			IsNamed:   false,
+			Host:      m.runVolumeHostInput,
+			Container: cont,
+		})
+		m.currentView = types.ViewModeRunImage
+		return m, nil
+	case "backspace":
+		if len(m.runVolumeContInput) > 0 {
+			m.runVolumeContInput = m.runVolumeContInput[:len(m.runVolumeContInput)-1]
+		}
+	default:
+		if len(key) == 1 && key[0] >= 32 && key[0] < 127 {
+			m.runVolumeContInput += key
+		}
+	}
+	return m, nil
+}
+
+// --- File browser (for bind mount host path) ---
+
+func (m *Model) openFileBrowser() (tea.Model, tea.Cmd) {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		home = "/"
+	}
+	m.fileBrowserPath = home
+	m.fileBrowserIndex = 0
+	m.fileBrowserScroll = 0
+	m.fileBrowserEntries = listDir(home)
+	m.currentView = types.ViewModeRunFileBrowser
+	return m, nil
+}
+
+func (m *Model) handleFileBrowserKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	key := msg.String()
+
+	switch key {
+	case "esc":
+		// Back to volume picker chooser.
+		m.currentView = types.ViewModeRunVolumePicker
+		m.runVolumePickerMode = types.VolumePickerChoose
+		return m, nil
+	case "f", "F":
+		// Confirm: use the *current directory* as the host path.
+		m.runVolumeHostInput = m.fileBrowserPath
+		m.runVolumePickerMode = types.VolumePickerBind
+		m.runVolumeContInput = ""
+		m.currentView = types.ViewModeRunVolumePicker
+		return m, nil
+	case "up", "k":
+		if m.fileBrowserIndex > 0 {
+			m.fileBrowserIndex--
+		}
+		return m, nil
+	case "down", "j":
+		if m.fileBrowserIndex < len(m.fileBrowserEntries)-1 {
+			m.fileBrowserIndex++
+		}
+		return m, nil
+	case "enter":
+		if len(m.fileBrowserEntries) == 0 {
+			return m, nil
+		}
+		entry := m.fileBrowserEntries[m.fileBrowserIndex]
+		// ".." → go up one level.
+		if entry == "../" {
+			m.fileBrowserPath = filepath.Dir(m.fileBrowserPath)
+			m.fileBrowserEntries = listDir(m.fileBrowserPath)
+			m.fileBrowserIndex = 0
+			m.fileBrowserScroll = 0
+			return m, nil
+		}
+		// Directory entries end in "/" — descend into them.
+		if strings.HasSuffix(entry, "/") {
+			child := filepath.Join(m.fileBrowserPath, strings.TrimSuffix(entry, "/"))
+			m.fileBrowserPath = child
+			m.fileBrowserEntries = listDir(child)
+			m.fileBrowserIndex = 0
+			m.fileBrowserScroll = 0
+			return m, nil
+		}
+		// A file — select it as the host path.
+		m.runVolumeHostInput = filepath.Join(m.fileBrowserPath, entry)
+		m.runVolumePickerMode = types.VolumePickerBind
+		m.runVolumeContInput = ""
+		m.currentView = types.ViewModeRunVolumePicker
+		return m, nil
+	}
+	return m, nil
+}
+
+// listDir returns sorted entries of a directory. Directories are appended
+// with "/" so the renderer can tell them apart from files. ".." is always
+// the first entry (so users can navigate up). On error, returns just "..".
+func listDir(path string) []string {
+	out := []string{"../"}
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return out
+	}
+	var dirs, files []string
+	for _, e := range entries {
+		name := e.Name()
+		// Skip dotfiles — they clutter the view; users who need them can
+		// type the path manually later.
+		if strings.HasPrefix(name, ".") {
+			continue
+		}
+		if e.IsDir() {
+			dirs = append(dirs, name+"/")
+		} else {
+			files = append(files, name)
+		}
+	}
+	sort.Strings(dirs)
+	sort.Strings(files)
+	out = append(out, dirs...)
+	out = append(out, files...)
+	return out
+}
+
+// --- Chat with a DMR model ---
+
+// handleModelChat opens an in-app streaming chat with the selected model.
+func (m *Model) handleModelChat() (tea.Model, tea.Cmd) {
+	if m.selectedRow >= len(m.models) {
+		return m, nil
+	}
+	mod := m.models[m.selectedRow]
+	ref := mod.Repository + ":" + mod.Tag
+
+	// Start a fresh conversation each time R is pressed — previous
+	// history is dropped intentionally so the user isn't surprised by
+	// leftover context after navigating away.
+	m.chatModelRef = ref
+	m.chatMessages = nil
+	m.chatInput = ""
+	m.chatCurrentResponse = ""
+	m.chatStreaming = false
+	m.chatError = ""
+	m.chatScrollOffset = 0
+	m.closeChatStream()
+	m.currentView = types.ViewModeChat
+	return m, nil
+}
+
+func (m *Model) closeChatStream() {
+	if m.chatBody != nil {
+		_ = m.chatBody.Close()
+		m.chatBody = nil
+	}
+	m.chatReader = nil
+}
+
+func (m *Model) handleChatViewKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	key := msg.String()
+
+	switch key {
+	case "esc":
+		// Bail out — drop any in-flight stream.
+		m.closeChatStream()
+		m.chatStreaming = false
+		m.chatCurrentResponse = ""
+		m.currentView = types.ViewModeList
+		return m, nil
+	case "ctrl+l":
+		// Quick clear: wipe history but keep the model selection.
+		m.chatMessages = nil
+		m.chatCurrentResponse = ""
+		m.chatError = ""
+		return m, nil
+	case "pgup":
+		if m.chatScrollOffset > 5 {
+			m.chatScrollOffset -= 5
+		} else {
+			m.chatScrollOffset = 0
+		}
+		return m, nil
+	case "pgdown":
+		m.chatScrollOffset += 5
+		return m, nil
+	}
+
+	// While streaming the only useful input is ESC (handled above) — don't
+	// let the user type a new prompt while the previous one is generating.
+	if m.chatStreaming {
+		return m, nil
+	}
+
+	switch key {
+	case "enter":
+		prompt := strings.TrimSpace(m.chatInput)
+		if prompt == "" {
+			return m, nil
+		}
+		m.chatMessages = append(m.chatMessages, types.ChatMessage{
+			Role: "user", Content: prompt,
+		})
+		m.chatInput = ""
+		m.chatStreaming = true
+		m.chatCurrentResponse = ""
+		m.chatError = ""
+		return m, m.startChatCmd(m.chatModelRef, m.chatMessages)
+	case "backspace":
+		if len(m.chatInput) > 0 {
+			m.chatInput = m.chatInput[:len(m.chatInput)-1]
+		}
+		return m, nil
+	}
+
+	if len(key) == 1 && key[0] >= 32 && key[0] < 127 {
+		m.chatInput += key
+	}
+	return m, nil
+}
+
+// --- Model tag picker ---
+
+func (m *Model) openModelTagPicker(repo string) (tea.Model, tea.Cmd) {
+	m.tagPickerRepo = repo
+	m.tagPickerTags = nil
+	m.tagPickerIndex = 0
+	m.tagPickerScroll = 0
+	m.tagPickerLoading = true
+	m.tagPickerError = ""
+	m.currentView = types.ViewModeModelTagPicker
+	return m, m.fetchModelTagsCmd(repo)
+}
+
+func (m *Model) handleTagPickerKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	key := msg.String()
+
+	switch key {
+	case "esc":
+		// Back to the model search results (stage 2 of the pull flow).
+		m.currentView = types.ViewModePullModel
+		m.tagPickerTags = nil
+		m.tagPickerError = ""
+		return m, nil
+	case "up", "k":
+		if m.tagPickerIndex > 0 {
+			m.tagPickerIndex--
+			if m.tagPickerIndex < m.tagPickerScroll {
+				m.tagPickerScroll = m.tagPickerIndex
+			}
+		}
+		return m, nil
+	case "down", "j":
+		if m.tagPickerIndex < len(m.tagPickerTags)-1 {
+			m.tagPickerIndex++
+			visible := m.tagPickerViewportHeight()
+			if m.tagPickerIndex >= m.tagPickerScroll+visible {
+				m.tagPickerScroll = m.tagPickerIndex - visible + 1
+			}
+		}
+		return m, nil
+	case "enter":
+		if m.tagPickerLoading || m.tagPickerIndex >= len(m.tagPickerTags) {
+			return m, nil
+		}
+		tag := m.tagPickerTags[m.tagPickerIndex]
+		ref := m.tagPickerRepo + ":" + tag.Tag
+		// Reuse the existing pull flow (stage 3 = pulling).
+		m.currentView = types.ViewModePullModel
+		m.pullStage = 3
+		m.pullingImageName = ref
+		m.actionInProgress = true
+		m.statusMessage = "Pulling " + ref + "..."
+		return m, m.pullModelCmd(ref)
+	}
+	return m, nil
+}
+
+func (m *Model) tagPickerViewportHeight() int {
+	h := m.height - 10
+	if h < 5 {
+		h = 5
+	}
+	return h
 }

@@ -96,7 +96,7 @@ function buildHeroFrame() {
     .join("\n");
 
   const pagerLeft = "  Showing 1-6 of 6";
-  const pagerRight = "F1 help · q quit  ";
+  const pagerRight = "? help · ⌃C×2 quit  ";
   const pager = colorize.dim(pagerLeft) + " ".repeat(Math.max(1, FRAME_WIDTH - pagerLeft.length - pagerRight.length)) + colorize.dim(pagerRight);
 
   return [tabTop, tabRow, tabMerge, headers, rowLines, pager].join("\n");

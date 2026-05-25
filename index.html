@@ -6,7 +6,7 @@
     <title>tinyd — a tiny Docker Desktop in your terminal</title>
     <meta
       name="description"
-      content="tinyd is a blazingly fast, beautifully minimal Terminal UI for Docker. Containers, images, volumes, networks — all from your keyboard."
+      content="tinyd is a blazingly fast, beautifully minimal Terminal UI for Docker. Containers, images, models, volumes, networks — all from your keyboard."
     />
     <meta property="og:title" content="tinyd — a tiny Docker Desktop in your terminal" />
     <meta
@@ -52,9 +52,9 @@
       <section class="hero">
         <div class="hero-inner">
           <div class="hero-copy">
-            <a class="badge badge-link" href="https://github.com/jalonsogo/tinyd/releases/tag/v0.2.0" target="_blank" rel="noopener">
+            <a class="badge badge-link" href="https://github.com/jalonsogo/tinyd/releases/tag/v0.3.0" target="_blank" rel="noopener">
               <span class="badge-dot"></span>
-              <span>v0.2.0 · released 2026-05-24</span>
+              <span>v0.3.0 · released 2026-05-25</span>
               <span class="badge-arrow" aria-hidden="true">↗</span>
             </a>
             <h1>
@@ -62,16 +62,17 @@
               that lives in your&nbsp;<span class="mono-word accent-green">terminal<span class="hero-cursor" aria-hidden="true">▌</span></span>
             </h1>
             <p class="lede">
-              Containers, images, volumes and networks — managed with a keystroke.
-              No browser tabs. No memorized flags. Just a beautifully minimal TUI
-              that adapts to any pane.
+              Containers, images, volumes, networks — and now local AI models
+              via Docker Model Runner. All managed with a keystroke, no browser
+              tabs, no memorized flags. Just a beautifully minimal TUI that
+              adapts to any pane.
             </p>
 
             <div class="cta-row">
               <a class="cta-primary cta-download" href="https://github.com/jalonsogo/tinyd/releases/latest" target="_blank" rel="noopener">
                 <span class="prompt">↓</span>
                 <span class="cta-cmd">Download tinyd</span>
-                <span class="cta-version">v0.2.0</span>
+                <span class="cta-version">v0.3.0</span>
               </a>
               <a class="cta-secondary" href="https://github.com/jalonsogo/tinyd" target="_blank" rel="noopener">
                 view on github →
@@ -79,18 +80,18 @@
             </div>
             <div class="platform-row" aria-label="Download for your platform">
               <span class="platform-label">binaries:</span>
-              <a class="platform-link" href="https://github.com/jalonsogo/tinyd/releases/download/v0.2.0/tinyd_0.2.0_macOS_arm64.tar.gz">macOS · arm64</a>
-              <a class="platform-link" href="https://github.com/jalonsogo/tinyd/releases/download/v0.2.0/tinyd_0.2.0_macOS_amd64.tar.gz">macOS · amd64</a>
-              <a class="platform-link" href="https://github.com/jalonsogo/tinyd/releases/download/v0.2.0/tinyd_0.2.0_linux_amd64.tar.gz">linux · amd64</a>
-              <a class="platform-link" href="https://github.com/jalonsogo/tinyd/releases/download/v0.2.0/tinyd_0.2.0_linux_arm64.tar.gz">linux · arm64</a>
-              <a class="platform-link" href="https://github.com/jalonsogo/tinyd/releases/download/v0.2.0/tinyd_0.2.0_windows_amd64.zip">windows · amd64</a>
-              <a class="platform-link" href="https://github.com/jalonsogo/tinyd/releases/download/v0.2.0/tinyd_0.2.0_windows_arm64.zip">windows · arm64</a>
+              <a class="platform-link" href="https://github.com/jalonsogo/tinyd/releases/download/v0.3.0/tinyd_0.3.0_macOS_arm64.tar.gz">macOS · arm64</a>
+              <a class="platform-link" href="https://github.com/jalonsogo/tinyd/releases/download/v0.3.0/tinyd_0.3.0_macOS_amd64.tar.gz">macOS · amd64</a>
+              <a class="platform-link" href="https://github.com/jalonsogo/tinyd/releases/download/v0.3.0/tinyd_0.3.0_linux_amd64.tar.gz">linux · amd64</a>
+              <a class="platform-link" href="https://github.com/jalonsogo/tinyd/releases/download/v0.3.0/tinyd_0.3.0_linux_arm64.tar.gz">linux · arm64</a>
+              <a class="platform-link" href="https://github.com/jalonsogo/tinyd/releases/download/v0.3.0/tinyd_0.3.0_windows_amd64.zip">windows · amd64</a>
+              <a class="platform-link" href="https://github.com/jalonsogo/tinyd/releases/download/v0.3.0/tinyd_0.3.0_windows_arm64.zip">windows · arm64</a>
             </div>
 
             <ul class="hero-meta">
               <li><span class="meta-k">stack</span><span class="meta-v">Go · Bubble Tea · Lipgloss</span></li>
               <li><span class="meta-k">size</span><span class="meta-v">60×13 min</span></li>
-              <li><span class="meta-k">deps</span><span class="meta-v">Docker daemon</span></li>
+              <li><span class="meta-k">deps</span><span class="meta-v">Docker daemon · DMR (opt.)</span></li>
             </ul>
           </div>
 
@@ -137,29 +138,30 @@
           <span class="kicker"># features</span>
           <h2>Everything you reach for, one keypress away.</h2>
           <p>
-            Four tabs. Live stats. Deep inspection. tinyd treats Docker the way
-            <code>top</code> treats processes — fast, focused, fluent.
+            Five tabs. Live stats. Deep inspection. In-app chat with local AI
+            models. tinyd treats Docker the way <code>top</code> treats
+            processes — fast, focused, fluent.
           </p>
         </div>
 
         <div class="feature-grid">
           <article class="feature">
-            <div class="feature-icon" data-icon="containers">
-              <span class="dot-led green"></span>
-              <span class="dot-led green"></span>
-              <span class="dot-led red"></span>
+            <div class="feature-icon icon-box" data-icon="containers">
+              <i class="box-handle"></i>
+              <i class="box-outer"></i>
+              <i class="box-seam"></i>
             </div>
             <h3>Containers</h3>
             <p>
-              Real-time CPU and memory. Start, stop, restart, exec, logs and open
-              exposed ports straight into your browser.
+              Real-time CPU and memory. Start, stop, restart, drop into an
+              interactive shell, and tail logs with substring search.
             </p>
             <ul class="feature-keys">
               <li><kbd>s</kbd> start/stop</li>
               <li><kbd>r</kbd> restart</li>
-              <li><kbd>c</kbd> console</li>
+              <li><kbd>e</kbd> exec shell</li>
               <li><kbd>l</kbd> logs</li>
-              <li><kbd>o</kbd> open port</li>
+              <li><kbd>d</kbd> delete</li>
             </ul>
           </article>
 
@@ -169,34 +171,60 @@
             </div>
             <h3>Images</h3>
             <p>
-              Layer-by-layer composition, architecture, exposed config. Spawn new
-              containers with an interactive modal for ports, volumes and env.
+              Layer-by-layer composition, architecture, exposed config. Spawn
+              new containers via an interactive modal — name, ports, env, and a
+              volume picker (existing, new named, or bind mount). Pull from
+              Docker Hub or re-pull the latest tag in one keypress.
             </p>
             <ul class="feature-keys">
-              <li><kbd>R</kbd> run new</li>
+              <li><kbd>r</kbd> run new</li>
+              <li><kbd>p</kbd> pull</li>
+              <li><kbd>u</kbd> update</li>
               <li><kbd>i</kbd> inspect</li>
-              <li><kbd>f</kbd> filter</li>
-              <li><kbd>D</kbd> delete</li>
+              <li><kbd>d</kbd> delete</li>
             </ul>
           </article>
 
           <article class="feature">
-            <div class="feature-icon icon-vol" data-icon="volumes">
-              <i class="ring"></i>
+            <div class="feature-icon icon-models" data-icon="models">
+              <i class="pulse"></i>
+              <i class="pulse pulse-2"></i>
+              <i class="pulse pulse-3"></i>
+            </div>
+            <h3>Models <span class="badge-new">new</span></h3>
+            <p>
+              First-class support for Docker Model Runner. Pull local LLMs from
+              the <code>ai/</code> namespace, pick a variant by params and
+              quant, then chat with them in a full-screen streaming transcript —
+              all without leaving the terminal.
+            </p>
+            <ul class="feature-keys">
+              <li><kbd>c</kbd> chat in-app</li>
+              <li><kbd>r</kbd> REPL</li>
+              <li><kbd>p</kbd> pull variant</li>
+              <li><kbd>y</kbd> yank curl</li>
+              <li><kbd>d</kbd> delete</li>
+            </ul>
+          </article>
+
+          <article class="feature feature-row-2">
+            <div class="feature-icon icon-folder" data-icon="volumes">
+              <i class="folder-tab"></i>
+              <i class="folder-body"></i>
             </div>
             <h3>Volumes</h3>
             <p>
               See exactly which containers are attached, driver options, usage —
-              and delete safely with confirmation.
+              and delete safely with inline Yes/No confirmation.
             </p>
             <ul class="feature-keys">
               <li><kbd>i</kbd> inspect</li>
-              <li><kbd>D</kbd> delete</li>
-              <li><kbd>f</kbd> filter</li>
+              <li><kbd>d</kbd> delete</li>
+              <li><kbd>v</kbd> columns</li>
             </ul>
           </article>
 
-          <article class="feature">
+          <article class="feature feature-row-2">
             <div class="feature-icon icon-net" data-icon="networks">
               <i class="node"></i>
               <i class="node"></i>
@@ -206,21 +234,24 @@
             </div>
             <h3>Networks</h3>
             <p>
-              Topology at a glance. IPv4 / IPv6 subnets, active vs. unused filters,
+              Topology at a glance. IPv4 / IPv6 subnets, driver and scope,
               connection state — for when port-mapping math gets hairy.
             </p>
             <ul class="feature-keys">
               <li><kbd>i</kbd> inspect</li>
-              <li><kbd>f</kbd> filter</li>
+              <li><kbd>d</kbd> delete</li>
+              <li><kbd>v</kbd> columns</li>
             </ul>
           </article>
 
           <article class="feature feature-wide">
             <h3><span class="accent-green">Fully responsive</span> — works in every pane you throw it in.</h3>
             <p>
-              Adapts to any terminal size, with a min of 60 columns × 13 rows. Resize
-              your VS Code split, drop into a tmux pane, or SSH into a remote Docker
-              host — the layout reflows without a restart.
+              Adapts to any terminal size, with a min of 60 columns × 13 rows.
+              Resize your VS Code split, drop into a tmux pane, or SSH into a
+              remote Docker host — the layout reflows without a restart.
+              Auto-detects your light/dark terminal background, and lets you
+              toggle columns per-tab with <kbd>v</kbd>.
             </p>
             <div class="terminal-set">
               <div class="mini-term" data-w="120">
@@ -245,7 +276,7 @@
         <div class="section-head">
           <span class="kicker"># live demo</span>
           <h2>A look inside the TUI.</h2>
-          <p>Switch tabs. The interface is keyboard-only — and proud of it.</p>
+          <p>Switch tabs — including the new Models tab. The interface is keyboard-only and proud of it.</p>
         </div>
 
         <div class="demo">
@@ -255,7 +286,7 @@
               <span class="dot yellow"></span>
               <span class="dot green"></span>
               <span class="term-title">tinyd · docker.sock</span>
-              <span class="term-help">F1 help · q quit</span>
+              <span class="term-help">? help · ⌃C×2 quit</span>
             </div>
             <div class="demo-dots" aria-hidden="true">···</div>
             <div class="demo-tabs" role="tablist">
@@ -271,8 +302,8 @@
               <span class="sb-item" id="sb-pager">Showing 1-0 of 0</span>
               <span class="sb-item sb-spacer"></span>
               <span class="sb-item"><kbd>i</kbd> inspect</span>
-              <span class="sb-item"><kbd>D</kbd> delete</span>
-              <span class="sb-item"><kbd>f</kbd> filter</span>
+              <span class="sb-item"><kbd>d</kbd> delete</span>
+              <span class="sb-item"><kbd>v</kbd> columns</span>
               <span class="sb-item"><kbd>1</kbd>–<kbd>5</kbd> tabs</span>
             </div>
           </div>
@@ -284,16 +315,16 @@
         <div class="section-head">
           <span class="kicker"># install</span>
           <h2>Three lines and you're in.</h2>
-          <p>Requires Go 1.19+ and a running Docker daemon (local or remote).</p>
+          <p>Prebuilt binaries for macOS, Linux and Windows on amd64 and arm64. Building from source needs Go 1.24+. The Models tab also wants <a href="https://docs.docker.com/ai/model-runner/" target="_blank" rel="noopener">Docker Model Runner</a> enabled.</p>
         </div>
 
         <div class="install-grid">
           <div class="install-card">
-            <div class="install-card-head"><span class="green">●</span> download binary <span class="install-version">v0.2.0</span></div>
+            <div class="install-card-head"><span class="green">●</span> download binary <span class="install-version">v0.3.0</span></div>
             <pre><code><span class="c c-comment"># macOS · Apple Silicon</span>
-<span class="c">$</span> curl -L https://github.com/jalonsogo/tinyd/releases/download/v0.2.0/tinyd_0.2.0_macOS_arm64.tar.gz | tar xz
+<span class="c">$</span> curl -L https://github.com/jalonsogo/tinyd/releases/download/v0.3.0/tinyd_0.3.0_macOS_arm64.tar.gz | tar xz
 <span class="c">$</span> ./tinyd</code></pre>
-            <button class="copy" data-copy="curl -L https://github.com/jalonsogo/tinyd/releases/download/v0.2.0/tinyd_0.2.0_macOS_arm64.tar.gz | tar xz&#10;./tinyd">copy</button>
+            <button class="copy" data-copy="curl -L https://github.com/jalonsogo/tinyd/releases/download/v0.3.0/tinyd_0.3.0_macOS_arm64.tar.gz | tar xz&#10;./tinyd">copy</button>
           </div>
 
           <div class="install-card">
@@ -318,7 +349,7 @@
         <div class="section-head">
           <span class="kicker"># keyboard</span>
           <h2>The whole interface, on a postcard.</h2>
-          <p>All letter keys are case-insensitive. <kbd>F1</kbd> opens help any time.</p>
+          <p>Most letter keys are case-insensitive. <kbd>?</kbd> or <kbd>Shift</kbd>+<kbd>H</kbd> opens help any time.</p>
         </div>
 
         <div class="keys-grid">
@@ -329,18 +360,18 @@
               <dt><kbd>↓</kbd> <kbd>j</kbd></dt><dd>move down</dd>
               <dt><kbd>←</kbd> <kbd>h</kbd></dt><dd>prev tab</dd>
               <dt><kbd>→</kbd> <kbd>l</kbd></dt><dd>next tab</dd>
-              <dt><kbd>1</kbd>–<kbd>4</kbd></dt><dd>jump to tab</dd>
+              <dt><kbd>1</kbd>–<kbd>5</kbd></dt><dd>jump to tab</dd>
             </dl>
           </div>
           <div class="keys-col">
             <h4>universal</h4>
             <dl>
               <dt><kbd>i</kbd></dt><dd>inspect</dd>
-              <dt><kbd>D</kbd></dt><dd>delete</dd>
-              <dt><kbd>f</kbd></dt><dd>filter</dd>
-              <dt><kbd>F1</kbd></dt><dd>help</dd>
-              <dt><kbd>esc</kbd></dt><dd>back</dd>
-              <dt><kbd>q</kbd></dt><dd>quit</dd>
+              <dt><kbd>d</kbd></dt><dd>delete</dd>
+              <dt><kbd>v</kbd></dt><dd>toggle columns</dd>
+              <dt><kbd>?</kbd></dt><dd>help</dd>
+              <dt><kbd>esc</kbd></dt><dd>back / cancel</dd>
+              <dt><kbd>⌃C</kbd> ×2</dt><dd>quit</dd>
             </dl>
           </div>
           <div class="keys-col">
@@ -348,18 +379,26 @@
             <dl>
               <dt><kbd>s</kbd></dt><dd>start / stop</dd>
               <dt><kbd>r</kbd></dt><dd>restart</dd>
-              <dt><kbd>c</kbd></dt><dd>console (altscreen)</dd>
-              <dt><kbd>o</kbd></dt><dd>open port</dd>
-              <dt><kbd>l</kbd></dt><dd>logs</dd>
+              <dt><kbd>e</kbd></dt><dd>exec shell</dd>
+              <dt><kbd>l</kbd></dt><dd>logs (then <kbd>s</kbd> search)</dd>
             </dl>
           </div>
           <div class="keys-col">
             <h4>images</h4>
             <dl>
-              <dt><kbd>R</kbd></dt><dd>run new container</dd>
+              <dt><kbd>r</kbd></dt><dd>run new container</dd>
+              <dt><kbd>p</kbd></dt><dd>pull from hub</dd>
+              <dt><kbd>u</kbd></dt><dd>update to latest</dd>
               <dt><kbd>i</kbd></dt><dd>inspect layers</dd>
-              <dt><kbd>D</kbd></dt><dd>remove image</dd>
-              <dt><kbd>f</kbd></dt><dd>filter status</dd>
+            </dl>
+          </div>
+          <div class="keys-col">
+            <h4>models</h4>
+            <dl>
+              <dt><kbd>c</kbd></dt><dd>chat in-app</dd>
+              <dt><kbd>r</kbd> / <kbd>⇧R</kbd></dt><dd>shell REPL</dd>
+              <dt><kbd>p</kbd></dt><dd>pull variant</dd>
+              <dt><kbd>y</kbd></dt><dd>yank curl</dd>
             </dl>
           </div>
         </div>

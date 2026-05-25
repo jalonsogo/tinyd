@@ -35,7 +35,7 @@ func init() { InitTheme(true) } // default: dark; overridden by main() before Ne
 func InitTheme(dark bool) {
 	DarkBackground = dark
 	if dark {
-		ColorNormal = lipgloss.Color("#AAAAAA")
+		ColorNormal = lipgloss.Color("#DDDDDD") // brighter body text
 		ColorDim = lipgloss.Color("#666666")
 		ColorBright = lipgloss.Color("#EEEEEE")
 		ColorHeader = lipgloss.Color("#CCCCCC")
@@ -43,12 +43,10 @@ func InitTheme(dark bool) {
 		ColorActiveBorder = lipgloss.Color("#DDDDDD")
 		ColorHighlight = lipgloss.Color("#00CCFF")
 		ColorEmpty = lipgloss.Color("#3A3A3A")
-		// Dark mode uses slate-500 — needs to be visibly lighter than the
-		// dark terminal background; slate-700 (the light-mode pick) was
-		// too close to the bg and the selection barely registered.
-		// Desaturated either way to avoid the red-on-blue chromatic
-		// fringing the saturated blue caused.
-		ColorSelectedBg = lipgloss.Color("#64748B")
+		// Violet selection (Tailwind violet-600). Stands out on dark
+		// terminals without the red-on-blue clash the original blue
+		// caused. Light mode uses a darker shade of the same hue.
+		ColorSelectedBg = lipgloss.Color("#7C3AED")
 		ColorSelectedFg = lipgloss.Color("#FFFFFF")
 	} else {
 		// Light mode: high-contrast dark-on-white palette
@@ -60,8 +58,12 @@ func InitTheme(dark bool) {
 		ColorActiveBorder = lipgloss.Color("#000000")
 		ColorHighlight = lipgloss.Color("#005588") // dark teal
 		ColorEmpty = lipgloss.Color("#BBBBBB")
-		ColorSelectedBg = lipgloss.Color("#334155") // slate, desaturated
-		ColorSelectedFg = lipgloss.Color("#FFFFFF")
+		// Light mode flips the selection: a pale lavender background
+		// (violet-200) with dark violet text (violet-800), so the
+		// highlight feels native to a white terminal instead of a heavy
+		// dark-on-white block.
+		ColorSelectedBg = lipgloss.Color("#E9D5FF")
+		ColorSelectedFg = lipgloss.Color("#5B21B6")
 	}
 }
 

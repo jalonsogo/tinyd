@@ -409,6 +409,34 @@ func (m *Model) handleListViewKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	// Column-picker overlay: arrow keys move the cursor, Space/Enter
+	// toggle, V/ESC close. Other keys are swallowed so they don't
+	// accidentally start an action behind the overlay.
+	if m.showColumnPicker {
+		cols := togglableColumnsForTab(m.activeTab)
+		switch key {
+		case "esc", "v", "V":
+			m.showColumnPicker = false
+			return m, nil
+		case "up", "k":
+			if m.columnPickerCursor > 0 {
+				m.columnPickerCursor--
+			}
+			return m, nil
+		case "down", "j":
+			if m.columnPickerCursor < len(cols)-1 {
+				m.columnPickerCursor++
+			}
+			return m, nil
+		case " ", "enter":
+			if m.columnPickerCursor < len(cols) {
+				m.ToggleColumn(cols[m.columnPickerCursor].Key)
+			}
+			return m, nil
+		}
+		return m, nil
+	}
+
 	switch key {
 	// Navigation — always allowed, even while an action is in progress
 	case "up", "k":
@@ -552,6 +580,20 @@ func (m *Model) handleListViewKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.activeTab == types.TabModels {
 			curl := m.currentCurlExample()
 			return m, m.copyToClipboardCmd(curl, "curl example")
+		}
+		return m, nil
+
+	case "v", "V":
+		// Toggle the column-visibility picker overlay. Reset the
+		// cursor to the first togglable column each open so picker
+		// state doesn't leak across tabs with different column lists.
+		if !m.showColumnPicker {
+			m.columnPickerCursor = 0
+		}
+		m.showColumnPicker = !m.showColumnPicker
+		// If help was open, close it so only one overlay shows at a time.
+		if m.showColumnPicker && m.showHelp {
+			m.showHelp = false
 		}
 		return m, nil
 

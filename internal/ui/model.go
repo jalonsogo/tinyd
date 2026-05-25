@@ -4,6 +4,7 @@ package ui
 import (
 	"bufio"
 	"io"
+	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -107,6 +108,13 @@ type Model struct {
 	fileBrowserIndex   int
 	fileBrowserScroll  int
 
+	// Column visibility — keys correspond to togglable column labels
+	// (e.g. "status", "cpu", "mem"). Initialised from TINYD_HIDE_COLS or
+	// hard defaults; mutated at runtime via the V column picker overlay.
+	hiddenColumns      map[string]bool
+	showColumnPicker   bool
+	columnPickerCursor int
+
 	// Model tag picker (intermediate screen between "select repo" in the
 	// model-pull search results and the actual pull).
 	tagPickerRepo    string
@@ -157,8 +165,9 @@ type Model struct {
 
 // NewModel creates an initial model with default state. version is the build
 // version (set via -ldflags in releases, "dev" otherwise) and is shown in
-// the header.
-func NewModel(version string) (*Model, error) {
+// the header. hidden is the initial set of hidden column keys (typically
+// derived from TINYD_HIDE_COLS in main).
+func NewModel(version string, hidden map[string]bool) (*Model, error) {
 	// Create Docker client
 	dockerClient, err := docker.NewClient()
 	if err != nil {
@@ -201,7 +210,32 @@ func NewModel(version string) (*Model, error) {
 		runPorts:   []types.PortMapping{},
 		runVolumes: []types.VolumeMapping{},
 		runEnvVars: []types.EnvVar{},
+
+		hiddenColumns: hidden,
 	}, nil
+}
+
+// IsColumnVisible reports whether a given column key should render. Empty
+// keys are always visible (used for fixed columns like the status dot or
+// NAME / REPOSITORY:TAG which can't be hidden).
+func (m *Model) IsColumnVisible(key string) bool {
+	if key == "" {
+		return true
+	}
+	return !m.hiddenColumns[strings.ToLower(key)]
+}
+
+// ToggleColumn flips the visibility of a column key.
+func (m *Model) ToggleColumn(key string) {
+	if m.hiddenColumns == nil {
+		m.hiddenColumns = map[string]bool{}
+	}
+	key = strings.ToLower(key)
+	if m.hiddenColumns[key] {
+		delete(m.hiddenColumns, key)
+	} else {
+		m.hiddenColumns[key] = true
+	}
 }
 
 // Init initializes the model and fetches initial data

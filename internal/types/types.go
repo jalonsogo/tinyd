@@ -73,6 +73,13 @@ type ChatMessage struct {
 	Content string
 }
 
+// ColumnDef describes a togglable table column. Key is the value stored
+// in hiddenColumns; Label is what the picker overlay shows.
+type ColumnDef struct {
+	Key   string
+	Label string
+}
+
 // ImageSearchItem is a single Docker Hub search result
 type ImageSearchItem struct {
 	Name          string

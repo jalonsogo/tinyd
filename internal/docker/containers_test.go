@@ -56,30 +56,6 @@ func TestParseContainerStatus(t *testing.T) {
 	}
 }
 
-func TestFormatImageName(t *testing.T) {
-	tests := []struct {
-		name     string
-		input    string
-		expected string
-	}{
-		{"short name", "nginx", "nginx"},
-		{"name with tag", "nginx:latest", "nginx"},
-		{"long name without tag", "very-long-repository-name-that-exceeds-17-chars", "very-long-repo..."},
-		{"long name with tag", "very-long-repository-name:latest", "very-long-repo..."},
-		{"exactly 17 chars", "12345678901234567", "12345678901234567"},
-		{"18 chars triggers truncation", "123456789012345678", "12345678901..."},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := formatImageName(tt.input)
-			if result != tt.expected {
-				t.Errorf("formatImageName(%q) = %q, want %q", tt.input, result, tt.expected)
-			}
-		})
-	}
-}
-
 func TestFormatPorts(t *testing.T) {
 	tests := []struct {
 		name     string

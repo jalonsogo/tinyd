@@ -58,8 +58,7 @@ func (c *Client) parseContainer(ctx context.Context, dockerContainer container.S
 	// Parse status
 	status := parseContainerStatus(string(dockerContainer.State), dockerContainer.Status)
 
-	// Format image (shorten if too long)
-	img := formatImageName(dockerContainer.Image)
+	img := dockerContainer.Image
 
 	// Format ports
 	ports := formatPorts(dockerContainer.Ports)
@@ -287,19 +286,6 @@ func parseContainerStatus(state, status string) string {
 		}
 	}
 	return s
-}
-
-func formatImageName(img string) string {
-	if len(img) > 17 {
-		parts := strings.Split(img, ":")
-		if len(parts) > 0 {
-			img = parts[0]
-			if len(img) > 17 {
-				img = img[:14] + "..."
-			}
-		}
-	}
-	return img
 }
 
 func formatPorts(ports []container.PortSummary) string {

@@ -4,6 +4,18 @@ All notable changes to tinyd will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.4.0](https://github.com/jalonsogo/tinyd/compare/v0.3.1...v0.4.0) (2026-05-26)
+
+
+### Features
+
+* run image and model pulls in the background ([#10](https://github.com/jalonsogo/tinyd/issues/10)) ([a3c14b6](https://github.com/jalonsogo/tinyd/commit/a3c14b68b5a0c08b2ce43cd95964c148c43d64f8))
+
+
+### Bug Fixes
+
+* let column width decide image-name truncation ([39de827](https://github.com/jalonsogo/tinyd/commit/39de8275f5a5b7c41a4cbb4b3e5f11b0392b1d1d))
+
 ## [0.3.1](https://github.com/jalonsogo/tinyd/compare/v0.3.0...v0.3.1) (2026-05-25)
 
 

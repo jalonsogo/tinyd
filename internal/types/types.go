@@ -145,6 +145,15 @@ type ModelListMsg []Model
 type ModelSearchMsg []ModelSearchItem
 type DMRAvailableMsg bool
 
+// PullCompleteMsg signals that a background image or model pull finished.
+// Err is empty on success. Kind is "image" or "model" so the update loop
+// knows which list to refresh.
+type PullCompleteMsg struct {
+	Name string
+	Kind string
+	Err  string
+}
+
 // ViewMode represents different UI views
 type ViewMode int
 

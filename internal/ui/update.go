@@ -104,19 +104,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.actionInProgress = false
 		m.actionLabel = ""
 		m.actionTargetID = ""
-		// If we were in the pull flow, return to the list view
-		if m.currentView == types.ViewModePullImage || m.currentView == types.ViewModePullModel {
-			wasModel := m.currentView == types.ViewModePullModel
-			m.currentView = types.ViewModeList
-			m.pullStage = 0
-			m.pullSearchQuery = ""
-			m.pullSearchResults = nil
-			m.pullingImageName = ""
-			if wasModel {
-				return m, m.fetchModelsCmd()
-			}
-			return m, tea.Batch(m.fetchContainersCmd(), m.fetchImagesCmd())
-		}
 		// Refresh the active tab — different surfaces have different ground truth
 		switch m.activeTab {
 		case types.TabModels:
@@ -136,13 +123,19 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.pullStage = 0
 			m.pullSearchError = string(msg)
 		}
-		// If a pull failed, also return to list view
-		if inPullFlow && m.pullStage == 3 {
-			m.currentView = types.ViewModeList
-			m.pullStage = 0
-			m.pullingImageName = ""
-		}
 		return m, nil
+
+	case types.PullCompleteMsg:
+		delete(m.activePulls, msg.Name)
+		if msg.Err != "" {
+			m.statusMessage = "ERROR: Failed to pull " + msg.Name + ": " + msg.Err
+		} else {
+			m.statusMessage = "Pulled " + msg.Name
+		}
+		if msg.Kind == "model" {
+			return m, m.fetchModelsCmd()
+		}
+		return m, tea.Batch(m.fetchContainersCmd(), m.fetchImagesCmd())
 
 	case types.LogsMsg:
 		m.logsContent = string(msg)
@@ -860,9 +853,7 @@ func (m *Model) handleImageUpdate() (tea.Model, tea.Cmd) {
 	if image.Tag != "" && image.Tag != "<none>" {
 		ref = image.Repository + ":" + image.Tag
 	}
-	m.actionLabel = "Updating " + ref
-	m.statusMessage = "Updating " + ref + " to latest..."
-	return m, m.updateImageCmd(ref)
+	return m.startBackgroundPull(ref, "image")
 }
 
 // --- Model handlers (Docker Model Runner) ---
@@ -923,9 +914,9 @@ func (m *Model) handleImagePullSearch() (tea.Model, tea.Cmd) {
 func (m *Model) handlePullViewKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
 
-	// Esc always returns to the list view (but not mid-pull — Docker API
-	// can't cancel an in-progress pull, so don't pretend we did)
-	if key == "esc" && m.pullStage != 3 {
+	// Esc returns to the list view. Pulls run in the background so there's
+	// no "mid-pull" state to guard against.
+	if key == "esc" {
 		m.currentView = types.ViewModeList
 		m.pullStage = 0
 		m.pullSearchQuery = ""
@@ -998,15 +989,8 @@ func (m *Model) handlePullViewKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m.openModelTagPicker(img.Name)
 			}
 
-			m.pullStage = 3
-			m.pullingImageName = img.Name
-			m.actionInProgress = true
-			m.statusMessage = "Pulling " + img.Name + "..."
-			return m, m.pullSearchCompleteCmd(img.Name)
+			return m.startBackgroundPull(img.Name, "image")
 		}
-		return m, nil
-
-	case 3: // pulling — ignore input
 		return m, nil
 	}
 
@@ -1651,13 +1635,7 @@ func (m *Model) handleTagPickerKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		tag := m.tagPickerTags[m.tagPickerIndex]
 		ref := m.tagPickerRepo + ":" + tag.Tag
-		// Reuse the existing pull flow (stage 3 = pulling).
-		m.currentView = types.ViewModePullModel
-		m.pullStage = 3
-		m.pullingImageName = ref
-		m.actionInProgress = true
-		m.statusMessage = "Pulling " + ref + "..."
-		return m, m.pullModelCmd(ref)
+		return m.startBackgroundPull(ref, "model")
 	}
 	return m, nil
 }
@@ -1668,4 +1646,34 @@ func (m *Model) tagPickerViewportHeight() int {
 		h = 5
 	}
 	return h
+}
+
+// startBackgroundPull kicks off an image or model pull as a fire-and-forget
+// command and returns the user straight to the list view. The pull runs in
+// its own goroutine via the returned tea.Cmd; PullCompleteMsg picks up the
+// result. kind is "image" or "model".
+func (m *Model) startBackgroundPull(name, kind string) (tea.Model, tea.Cmd) {
+	if m.activePulls == nil {
+		m.activePulls = map[string]string{}
+	}
+	if _, busy := m.activePulls[name]; busy {
+		m.statusMessage = "Already pulling " + name
+		return m, nil
+	}
+	m.activePulls[name] = kind
+
+	// Drop the pull-search/tag-picker overlay and reset its state so the
+	// user lands on the list view with the pull running in the background.
+	m.currentView = types.ViewModeList
+	m.pullStage = 0
+	m.pullSearchQuery = ""
+	m.pullSearchResults = nil
+	m.tagPickerRepo = ""
+	m.tagPickerTags = nil
+	m.statusMessage = ""
+
+	if kind == "model" {
+		return m, m.pullModelCmd(name)
+	}
+	return m, m.pullImageCmd(name)
 }

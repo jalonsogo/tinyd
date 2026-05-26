@@ -28,6 +28,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- **Background image & model pulls** — pulling an image (`p` on Images, `u` to update) or a model (`p` on Models → tag picker) now returns to the list view immediately and runs in the background. The action bar shows `⠋ Pulling <name>` for every in-flight pull, navigation and other actions stay responsive, and concurrent pulls are supported. Status updates to `Pulled <name>` or surfaces the error on completion. Triggering a pull for a name that's already in flight is short-circuited with `Already pulling <name>`.
+
+### Changed
+- **Models tab footer hidden until a model exists** — the pinned `API: … / Model: … / curl: …` panel no longer renders when the local model list is empty, so the "No local models. Press P to pull one from Docker Hub…" hint stands on its own.
+
+### Added (prior, pre-0.4.0)
 - **Customizable visible columns** — new `V` key opens a column-picker overlay on top of any tab listing the togglable columns with a `[x]` / `[ ]` checkbox each. ↑/↓ moves the cursor, Space/Enter toggles, V/ESC closes. Changes apply immediately and last for the session.
 - **`TINYD_HIDE_COLS` env var** seeds the initial hidden-column set at startup (comma-separated lowercase keys: `status,cpu,mem,ports,image,size,created,params,quant,driver,containers,mountpoint,scope,ipv4`). Default is `status` — the colored dot already encodes that signal so the textual STATUS column is redundant for most users. Set `TINYD_HIDE_COLS=-` (or `none`) to show everything.
 - **Copy curl to clipboard** — `Y` on the Models tab yanks the example `curl` command for the selected model to the system clipboard. Uses `pbcopy` (macOS), `wl-copy` / `xclip` / `xsel` (Linux), or `clip.exe` (Windows/WSL).

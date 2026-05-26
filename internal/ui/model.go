@@ -138,15 +138,21 @@ type Model struct {
 	// Pull image modal
 	pullImageName string
 
+	// activePulls tracks background image/model pulls so the UI can stay
+	// responsive while they run. Key is the image/model name; value is the
+	// kind ("image" or "model") so we know which list to refresh on
+	// completion.
+	activePulls map[string]string
+
 	// Pull image search flow (p in Images tab)
-	// pullStage: 0 = input, 1 = searching, 2 = results, 3 = pulling
+	// pullStage: 0 = input, 1 = searching, 2 = results. Pulls themselves
+	// run in the background and are tracked in activePulls.
 	pullStage              int
 	pullSearchQuery        string
 	pullSearchResults      []types.ImageSearchItem
 	pullSearchSelected     int
 	pullSearchScrollOffset int
 	pullSearchError        string
-	pullingImageName       string // image currently being pulled (stage 3)
 
 	// List search (inline filter)
 	listSearchMode  bool
@@ -212,6 +218,7 @@ func NewModel(version string, hidden map[string]bool) (*Model, error) {
 		runEnvVars: []types.EnvVar{},
 
 		hiddenColumns: hidden,
+		activePulls:   map[string]string{},
 	}, nil
 }
 

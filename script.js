@@ -270,10 +270,10 @@ function bindKeyboard() {
     if (["1", "2", "3", "4", "5"].includes(key)) {
       const idx = parseInt(key, 10) - 1;
       if (buttons[idx]) buttons[idx].click();
-    } else if (key === "ArrowRight" || key === "l") {
+    } else if (key === "ArrowRight") {
       const active = buttons.findIndex((b) => b.classList.contains("is-active"));
       buttons[(active + 1) % count].click();
-    } else if (key === "ArrowLeft" || key === "h") {
+    } else if (key === "ArrowLeft") {
       const active = buttons.findIndex((b) => b.classList.contains("is-active"));
       buttons[(active - 1 + count) % count].click();
     }
@@ -344,6 +344,93 @@ function startLivePulse() {
   }, 1400);
 }
 
+/* ---------- sync latest release from GitHub ---------- */
+async function syncLatestRelease() {
+  const CACHE_KEY = "tinyd_latest_release_v1";
+  const TTL = 60 * 60 * 1000; // 1h
+
+  let release = null;
+  try {
+    const cached = JSON.parse(localStorage.getItem(CACHE_KEY) || "null");
+    if (cached && Date.now() - cached.t < TTL) release = cached.data;
+  } catch {}
+
+  if (!release) {
+    try {
+      const r = await fetch("https://api.github.com/repos/jalonsogo/tinyd/releases/latest", {
+        headers: { Accept: "application/vnd.github+json" },
+      });
+      if (!r.ok) return;
+      release = await r.json();
+      try {
+        localStorage.setItem(CACHE_KEY, JSON.stringify({ t: Date.now(), data: release }));
+      } catch {}
+    } catch {
+      return;
+    }
+  }
+  if (!release || !release.tag_name) return;
+
+  const tag = release.tag_name;
+  const ver = tag.replace(/^v/, "");
+  const date = release.published_at ? release.published_at.slice(0, 10) : null;
+  const assetUrl = (name) => {
+    const a = (release.assets || []).find((x) => x.name === name);
+    return a
+      ? a.browser_download_url
+      : `https://github.com/jalonsogo/tinyd/releases/download/${tag}/${name}`;
+  };
+
+  const badge = $(".badge-link");
+  if (badge) {
+    if (release.html_url) badge.href = release.html_url;
+    const text = badge.querySelector("span:not(.badge-dot):not(.badge-arrow)");
+    if (text) text.textContent = date ? `${tag} · released ${date}` : tag;
+  }
+
+  $$(".cta-version, .install-version").forEach((el) => {
+    el.textContent = tag;
+  });
+
+  const platforms = [
+    `tinyd_${ver}_macOS_arm64.tar.gz`,
+    `tinyd_${ver}_macOS_amd64.tar.gz`,
+    `tinyd_${ver}_linux_amd64.tar.gz`,
+    `tinyd_${ver}_linux_arm64.tar.gz`,
+    `tinyd_${ver}_windows_amd64.zip`,
+    `tinyd_${ver}_windows_arm64.zip`,
+  ];
+  $$(".platform-link").forEach((link, i) => {
+    if (platforms[i]) link.href = assetUrl(platforms[i]);
+  });
+
+  const macUrl = assetUrl(`tinyd_${ver}_macOS_arm64.tar.gz`);
+  const urlRe = /https:\/\/github\.com\/jalonsogo\/tinyd\/releases\/download\/v[\d.]+\/tinyd_[\d.]+_macOS_arm64\.tar\.gz/g;
+
+  $$(".install-card pre code").forEach((code) => {
+    if (!urlRe.test(code.textContent)) return;
+    urlRe.lastIndex = 0;
+    const walker = document.createTreeWalker(code, NodeFilter.SHOW_TEXT);
+    let node;
+    while ((node = walker.nextNode())) {
+      if (node.nodeValue && urlRe.test(node.nodeValue)) {
+        urlRe.lastIndex = 0;
+        node.nodeValue = node.nodeValue.replace(urlRe, macUrl);
+      }
+      urlRe.lastIndex = 0;
+    }
+  });
+
+  $$(".install-card .copy[data-copy]").forEach((btn) => {
+    const cur = btn.getAttribute("data-copy");
+    urlRe.lastIndex = 0;
+    if (cur && urlRe.test(cur)) {
+      urlRe.lastIndex = 0;
+      btn.setAttribute("data-copy", cur.replace(urlRe, macUrl));
+    }
+  });
+}
+
 /* ---------- boot ---------- */
 window.addEventListener("DOMContentLoaded", () => {
   typeOut();
@@ -353,4 +440,5 @@ window.addEventListener("DOMContentLoaded", () => {
   bindClock();
   renderDemo("containers");
   startLivePulse();
+  syncLatestRelease();
 });

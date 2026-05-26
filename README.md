@@ -39,6 +39,7 @@
 - Delete resources with inline confirmation
 - Run new containers from images via an interactive modal (name, ports, volumes, env vars)
 - Update local images to their latest tag with one key
+- **Background pulls** — image and model pulls run off the UI thread, so you keep navigating, inspecting, and triggering other actions while downloads finish. An action-bar spinner tracks every in-flight pull.
 - Chat with local AI models directly in the TUI (streaming)
 
 **🎨 Minimalist Design**
@@ -95,18 +96,18 @@ go build -o tinyd
   - **Select an existing volume** from the Volumes tab
   - **Create a new named volume** (name + container path)
   - **Bind mount** via a built-in directory browser (↑/↓ navigate, Enter descends, `F` confirms the current directory)
-- **`u`** — Update the selected image to its latest tag (re-pulls `repo:tag`)
-- **`p`** — Pull image from Docker Hub (search → results → pull)
+- **`u`** — Update the selected image to its latest tag (re-pulls `repo:tag` in the background)
+- **`p`** — Pull image from Docker Hub (search → results → background pull). The list view stays usable while the pull runs; status appears in the action bar.
 - **`i`** — Inspect layers, architecture, configuration
 - **`d`** — Delete
 
 ### Models (Docker Model Runner)
 - **`c`** — In-app **streaming chat** with the selected model. Full-screen transcript, `Ctrl+L` to clear, PgUp/PgDn to scroll, ESC to exit
 - **`r`** / **`Shift+R`** — Drop to the shell `docker model run <ref>` REPL
-- **`p`** — Pull model from Docker Hub. A second screen lists the available tags with parsed **Parameters** (e.g. `7B`), **Quantization** (e.g. `q4_K_M`), **Size**, and **Updated** date, so you can pick the specific variant before downloading
+- **`p`** — Pull model from Docker Hub. A second screen lists the available tags with parsed **Parameters** (e.g. `7B`), **Quantization** (e.g. `q4_K_M`), **Size**, and **Updated** date, so you can pick the specific variant before downloading. Models can be multi-GB — the pull runs in the background so you can keep using tinyd while it downloads.
 - **`i`** / **`d`** — Inspect raw DMR JSON / Delete
 
-The Models tab also shows a **connection panel** pinned to the bottom with the OpenAI-compatible base URL, the selected model ref, and a copy-pasteable `curl` example.
+The Models tab shows a **connection panel** pinned to the bottom with the OpenAI-compatible base URL, the selected model ref, and a copy-pasteable `curl` example. The panel is hidden when no models are pulled yet, so the "Press P to pull one" hint stands on its own.
 
 ### Volume Management
 - **`i`** — Inspect volume details, see which containers are attached

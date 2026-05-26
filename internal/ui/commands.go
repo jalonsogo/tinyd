@@ -193,48 +193,32 @@ func (m *Model) searchImagesCmd(query string) tea.Cmd {
 	}
 }
 
-// pullImageCmd pulls an image
+// pullImageCmd pulls an image in the background and emits PullCompleteMsg
+// when the goroutine returns. The UI is free to keep accepting input.
 func (m *Model) pullImageCmd(imageName string) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := m.docker.WithCustomTimeout(docker.TimeoutLong)
 		defer cancel()
 
+		msg := types.PullCompleteMsg{Name: imageName, Kind: "image"}
 		if err := m.docker.PullImage(ctx, imageName); err != nil {
-			return types.ActionErrorMsg(err.Error())
+			msg.Err = err.Error()
 		}
-		return types.ActionSuccessMsg("Image " + imageName + " pulled successfully")
+		return msg
 	}
 }
 
 // updateImageCmd re-pulls an existing image to update it to the latest
-// version under its tag. Same call as pullImageCmd, different status text.
+// version under its tag.
 func (m *Model) updateImageCmd(imageName string) tea.Cmd {
-	return func() tea.Msg {
-		ctx, cancel := m.docker.WithCustomTimeout(docker.TimeoutLong)
-		defer cancel()
-
-		if err := m.docker.PullImage(ctx, imageName); err != nil {
-			return types.ActionErrorMsg("Failed to update " + imageName + ": " + err.Error())
-		}
-		return types.ActionSuccessMsg("Updated " + imageName + " to latest")
-	}
+	return m.pullImageCmd(imageName)
 }
 
-// pullSearchCompleteCmd pulls an image and ensures the user is returned to the
-// list view (the generic pull command returns ActionSuccessMsg which doesn't
-// reset currentView). We chain a final state-reset message so completion exits
-// the pull flow cleanly.
+// pullSearchCompleteCmd pulls an image selected from the Hub search results.
+// Same underlying call as pullImageCmd; kept as a thin alias for the search
+// flow's caller.
 func (m *Model) pullSearchCompleteCmd(imageName string) tea.Cmd {
-	// Use the longer pull timeout
-	return func() tea.Msg {
-		ctx, cancel := m.docker.WithCustomTimeout(docker.TimeoutLong)
-		defer cancel()
-
-		if err := m.docker.PullImage(ctx, imageName); err != nil {
-			return types.ActionErrorMsg("Failed to pull " + imageName + ": " + err.Error())
-		}
-		return types.ActionSuccessMsg("Pulled " + imageName)
-	}
+	return m.pullImageCmd(imageName)
 }
 
 // inspectImageCmd retrieves image inspect data
@@ -392,15 +376,17 @@ func (m *Model) searchModelsCmd(query string) tea.Cmd {
 	}
 }
 
-// pullModelCmd pulls a DMR model
+// pullModelCmd pulls a DMR model in the background and emits
+// PullCompleteMsg on completion. The UI is free to keep accepting input.
 func (m *Model) pullModelCmd(ref string) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := m.dmr.WithCustomTimeout(dmr.TimeoutLong)
 		defer cancel()
+		msg := types.PullCompleteMsg{Name: ref, Kind: "model"}
 		if err := m.dmr.PullModel(ctx, ref); err != nil {
-			return types.ActionErrorMsg("Failed to pull " + ref + ": " + err.Error())
+			msg.Err = err.Error()
 		}
-		return types.ActionSuccessMsg("Pulled " + ref)
+		return msg
 	}
 }
 

@@ -3,6 +3,7 @@ package ui
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -119,7 +120,7 @@ func (m *Model) renderListView() string {
 	// bar, so the connection details are always visible at the bottom of
 	// the screen regardless of how many models are in the table.
 	var bottomPanel string
-	if !m.showHelp && m.activeTab == types.TabModels && m.dmrAvailable {
+	if !m.showHelp && m.activeTab == types.TabModels && m.dmrAvailable && len(m.models) > 0 {
 		bottomPanel = m.renderModelsAPIPanel()
 	}
 
@@ -1077,13 +1078,30 @@ func (m *Model) spinnerDot(selected bool) string {
 
 // currentStatusMessage returns the live message to show in the action bar:
 // an animated spinner + actionLabel while an action is running, otherwise
-// the last success/error message.
+// the last success/error message. When background pulls are in flight, the
+// last status is prefixed with a spinner + the list of pull targets so the
+// user keeps seeing them while navigating.
 func (m *Model) currentStatusMessage() string {
+	frames := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+	spinner := frames[m.animationFrame%len(frames)]
+
 	if m.actionInProgress && m.actionLabel != "" {
-		frames := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
-		spinner := frames[m.animationFrame%len(frames)]
 		return spinner + " " + m.actionLabel + "..."
 	}
+
+	if len(m.activePulls) > 0 {
+		names := make([]string, 0, len(m.activePulls))
+		for n := range m.activePulls {
+			names = append(names, n)
+		}
+		sort.Strings(names)
+		prefix := spinner + " Pulling " + strings.Join(names, ", ")
+		if m.statusMessage != "" {
+			return prefix + " · " + m.statusMessage
+		}
+		return prefix
+	}
+
 	return m.statusMessage
 }
 
@@ -1192,8 +1210,6 @@ func (m *Model) renderPullView() string {
 		headerRight = "[ESC] Cancel"
 	case 2:
 		headerRight = "[↑↓] Move  [ENTER] Pull  [ESC] Cancel"
-	case 3:
-		headerRight = "Pulling..."
 	}
 	headerSpacing := strings.Repeat(" ", max(1, m.width-len(headerText)-len(headerRight)-4))
 	b.WriteString(titleStyle.Render(headerText))
@@ -1305,21 +1321,6 @@ func (m *Model) renderPullView() string {
 				start+1, end, len(m.pullSearchResults))))
 			b.WriteString("\n")
 		}
-
-	case 3:
-		frames := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
-		spinner := frames[m.animationFrame%len(frames)]
-		highlightStyle := lipgloss.NewStyle().Foreground(components.ColorHighlight).Bold(true)
-		b.WriteString("\n")
-		b.WriteString(" ")
-		b.WriteString(highlightStyle.Render(spinner))
-		b.WriteString("  ")
-		b.WriteString(brightStyle.Render("Pulling "))
-		b.WriteString(brightStyle.Bold(true).Render(m.pullingImageName))
-		b.WriteString(brightStyle.Render("..."))
-		b.WriteString("\n\n")
-		b.WriteString(dimStyle.Render(" This may take a minute. The view will return when complete."))
-		b.WriteString("\n")
 	}
 
 	return b.String()
